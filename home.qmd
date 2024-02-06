@@ -1,0 +1,111 @@
+---
+title: "Project home"
+format: html
+editor: source
+---
+
+# Is ageing really invariant within species? A case study using _Drosophila melanogaster_.
+
+This page is a work in progress. Eventually it will contain a report that documents our analysis, with the aim to make it as reproducible and freely available as possible. For now, we just include the list of studies that we used to produce the results you might have seen on our poster. 
+
+# Studies
+
+**Natural variation, functional pleiotropy and transcriptional contexts of odorant binding proteins in _Drosophila melanogaster_**
+
+Authors: Arya, Weber, Wang, Magwire, Mackay and Anholt
+
+Year: 2010
+
+Journal: Genetics
+
+DOI: 10.1534/genetics.110.123166
+
+Abstract: How functional diversification affects the organization of the transcriptome is a central question in systems genetics.  To  explore  this  issue,  we  sequenced  all six _Odorant binding protein_ ( _Obp_) genes located on the X chromosome, four of which occur as a cluster, in 219 inbred wild-derived lines of _Drosophila melanogaster_ and tested for associations between genetic and phenotypic variation at the organismal and transcriptional level. We  observed  polymorphisms  in _Obp8a_, _Obp19a_, _Obp19b_,and _Obp19c_ associated with variation in olfactory responses and polymorphisms in _Obp19d_ associated with variation in life span. We inferred the transcriptional context, or "niche," of each gene by identifying expression polymorphisms where genetic variation in these _Obp_ genes was associated with variation in expression of transcripts genetically correlated to each _Obp_ gene. All six _Obp_ genes occupied a distinct transcriptional niche. Gene ontology enrichment analysis revealed associations of different _Obp_ transcriptional niches with olfactory behavior, synaptic transmission, detection of signals  regulating  tissue  development  and  apoptosis, postmating behavior and oviposition, and nutrient sensing. Our results show that diversification of the _Obp_ family has organized distinct transcriptional niches that reflect their acquisition of additional functions.
+
+**Genetic variation of dietary restriction and the effects of nutrient-free water and amino acid supplements on lifespan and fecundity of _Drosophila_**
+
+Authors: Dick, Ross and Yampolsky
+
+Year: 2011
+
+Journal: Genetics Research
+
+DOI: 10.1017/S001667231100019X
+
+Abstract: We measure genetic variation in lifespan and fecundity at two food levels in 34 core lines of the _Drosophila_ Genetic Reference Panel collection. Lines were significantly different from each other in lifespan and fecundity at both restricted and full food. There was a strong food-by-line interaction for the slope of age-specific mortality, fecundity and proportion of fertilized eggs, indicating the presence of genetic variation for the strength of the dietary restriction effect, likely to represent standing genetic variation in a natural population from which the lines used have originated. No trade-off between fecundity and lifespan manifested in life-history variation among inbred lines. Our data partially corroborate the recent proposition that availability of nutrient-free water eliminates the apparent dietary restriction at least in some conditions. Although flies on full food with water added had lifespan slightly higher than those without a water source, it was still significantly lower than that in flies on restricted food, with no indication of interaction. We fully corroborate the recently discovered effect of addition of essential amino acids to the medium: addition of 1.5 mM methionine to restricted food significantly increased fecundity without a measurable decrease in lifespan; addition of each of 10 essential amino acids increased fecundity and decreased females lifespan to the levels observed on full food, again with no evidence of line-by-food interactions. We propose a mechanistic hypothesis explaining the observed data, based on the assumption that food consumption by flies is adjusted according to flies’ saturation in water and methionine.
+
+**Genome-wide analysis in _Drosophila_ reveals age-specific effects of SNPs on fitness traits**
+
+Authors: Durham, Magwire, Stone, Leips
+
+Year: 2014
+
+Journal: Nature Communications
+
+DOI: 10.1038/ncomms5338
+
+Abstract: Most organisms exhibit senescence; a decline in physiological function with age. In nature, rates of senescence vary extensively among individuals and this variation has a significant genetic component; however, we know little about the genes underlying senescence. Here we show the first evidence that individual alleles influence fecundity in an age-specific manner and so the genetic basis of natural variation in fecundity changes dramatically with age. We complete a genome-wide association to identify single-nucleotide polymorphisms (SNPs) affecting  lifespan  and  age-specific  fecundity  using  the _Drosophila melanogaster_ Genetic Reference Panel. We identify 1,031 SNPs affecting fecundity and 52 influencing lifespan. Only one SNP is associated with both early- and late-age fecundity. The age-specific effect of candidate genes on fecundity is validated using RNA interference. In addition, there is a dramatic increase in the number of SNPs influencing fecundity with age. This result provides support for the mutation accumulation theory of aging.
+
+**Context-dependent genetic architecture of _Drosophila_ lifespan**
+
+Authors: Huang, Campbell, Carbone, Jones, Unselt, Anholt and Mackay
+
+Year: 2020
+
+Journal: PLoS Biology
+
+DOI: https://doi.org/10.1371/journal.pbio.3000645
+
+Abstract: Understanding the genetic basis of variation in life span is a major challenge that is difficult
+to address in human populations. Evolutionary theory predicts that alleles affecting natural variation in life span will have properties that enable them to persist in populations at intermediate frequencies, such as late-life–specific deleterious effects, antagonistic pleiotropic effects on early and late-age fitness components, and/or sex- and environment-specific or antagonistic effects. Here, we quantified variation in life span in males and females reared in 3 thermal environments for the sequenced, inbred lines of the _Drosophila melanogaster_ Genetic Reference Panel (DGRP) and an advanced intercross outbred population derived from a subset of DGRP lines. Quantitative genetic analyses of life span and the micro-environmental variance of life span in the DGRP revealed significant genetic variance for both traits within each sex and environment, as well as significant genotype-by-sex interaction (GSI) and genotype-by-environment interaction (GEI). Genome-wide association (GWA) mapping in both populations implicates over 2,000 candidate genes with sex- and environment-specific or antagonistic pleiotropic allelic effects. Over 1,000 of these genes are associated with variation in life span in other _D. melanogaster_ populations. We functionally assessed the effects of 15 candidate genes using RNA interference (RNAi): all affected life span and/or micro-environmental variance of life span in at least one sex and environment and exhibited sex-and environment-specific effects. Our results implicate novel candidate genes affecting life span and suggest that variation for life span may be maintained by variable allelic effects in heterogeneous environments.
+
+**GWAS for Lifespan and Decline in Climbing Ability in Flies upon Dietary Restriction Reveal _decima_ as a Mediator of Insulin-like Peptide Production**
+
+Authors: Wilson, Beck, Nelson, Hilsabeck, Promislow, Brem and Kapahi
+
+Year: 2020
+
+Journal: Current Biology
+
+DOI: https://doi.org/10.1016/j.cub.2020.05.020
+
+Abstract: Dietary restriction (DR) is the most robust means to extend lifespan and delay age-related diseases across species. An underlying assumption in the aging field is that DR enhances both lifespan and physical activity through similar mechanisms, but this has not been rigorously tested in different genetic backgrounds. Furthermore, nutrient response genes responsible for lifespan extension or age-related decline in functionality remain underexplored in natural populations. To address this, we measured nutrient-dependent changes in lifespan and age-related decline in climbing ability in the _Drosophila_ Genetic Reference Panel fly strains. On average, DR extended lifespan and delayed decline in climbing ability, but there was a lack of correlation between these traits across individual strains, suggesting that distinct genetic factors modulate these traits independently and that genotype determines response to diet. Only 50% of strains showed positive response to DR for both lifespan and climbing ability, 14% showed a negative response for one trait but not both, and 35% showed no change in one or both traits. Through GWAS, we uncovered a number of genes previously not known to be diet responsive nor to influence lifespan or climbing ability. We validated _decima_ as a gene that alters lifespan and _daedalus_ as one that influences age-related decline in climbing ability. We found that _decima_ influences insulin-like peptide transcription in the GABA receptor neurons downstream of _short neuropeptide F precursor_ ( _sNPF_) signaling. Modulating these genes produced independent effects on lifespan and physical activity decline, which suggests that these age-related traits can be regulated through distinct mechanisms.
+
+**Identification of genetic modifiers of lifespan on a high sugar diet in the _Drosophila_ Genetic Reference Panel**
+
+Authors: Patel and Talbert
+
+Year: 2021
+
+Journal: Heliyon
+
+DOI: https://doi.org/10.1016/j.heliyon.2021.e07153
+
+Abstract: Genome-wide association studies (GWAS) have become beneficial in identifying genetic variants underlying susceptibility to various complex diseases and conditions, including obesity. Utilizing the _Drosophila_ Genetic Reference Panel (DGRP), we performed a GWAS of lifespan of 193 genetically distinct lines on a high sugar diet (HSD). The DGRP analysis pipeline determined the most significant lifespan associated polymorphisms were within loci of genes involved in: neural processes, behavior, development, and apoptosis, among other functions. Next, based on the relevance to obesity pathology, and the availability of transgenic RNAi lines targeting the genes we identified, whole-body in vivo knockdown of several candidate genes was performed. We utilized the GAL4-UAS binary expression system to independently validate the impacts of these loci on _Drosophila_ lifespan during HSD. These loci were largely confirmed to affect lifespan in that HSD setting, as well as a normal diet setting. However, we also detected unexpected dietary effects of the HSD, including inconsistent diet effects on lifespan relative to a normal diet and a strong downregulation of feeding quantity.
+
+**Sex, mating and repeatability of _Drosophila melanogaster_ longevity**
+
+Authors: Hoffman, Dudeck, Patterson and Austad
+
+Year: 2021
+
+Journal: Royal Society Open Science
+
+DOI: https://doi.org/10.1098/rsos.210273
+
+Abstract: Costs of reproduction are seemingly ubiquitous across the animal kingdom, and these reproductive costs are generally defined by increased reproduction leading to decreases in other fitness components, often longevity. However, some recent reports question whether reproductive costs exist in every species or population. To provide insight on this issue, we sought to determine the extent to which genetic variation might play a role in one type of reproductive cost—survival—using _Drosophila melanogaster_. We found, surprisingly, no costs of reproduction nor sex differences in longevity across all 15 genetic backgrounds in two cohorts. We did find significant variation within some genotypes, though these were much smaller than expected. We also observed that small laboratory changes lead to significant changes in longevity within  genotypes, suggesting that longevity repeatability in flies may be difficult. We finally compared our results to previously published longevities and found that reproducibility is similar to what we saw in our own laboratory, further suggesting that stochasticity is a strong component of fruit fly lifespan. Overall, our results suggest that there are still large gaps in our knowledge about the effects of sex and mating, as well as genetic background and laboratory conditions on lifespan reproducibility.
+
+**The metabolome as a biomarker of aging in _Drosophila melanogaster_**
+
+Authors: Zhao, Golic, Harrison, Manoj, Hoffman, Simon, Johnson, MacCoss, McIntyre and Promislow 
+
+Year: 2022
+
+Journal: Ageing Cell
+
+DOI: 10.1111/acel.13548
+
+Abstract: Many biomarkers have been shown to be associated not only with chronological age  but also with functional measures of biological age. In human populations, it is difficult to show whether variation in  biological age is truly predictive of life expectancy, as such research would require longitudinal studies over many years, or even decades. We followed adult cohorts of 20 _Drosophila_ Genetic Reference Panel (DGRP) strains chosen to represent the breadth of lifespan variation, obtain estimates of lifespan, baseline mortality, and rate of aging, and associate these parameters with age-specific functional traits including  fecundity and climbing activity and with age-specific targeted metabolomic profiles. We show that activity levels and metabolome-wide profiles are strongly associated with age, that numerous individual metabolites  show a strong association with lifespan, and that the metabolome provides a biological clock  that  predicts not only sample age but also future mortality rates and lifespan. This study with 20 genotypes and 87 metabolites, while relatively small in scope, establishes strong proof of principle for the fly as a powerful experimental model to test  hypotheses about biomarkers and aging and provides further evidence for the potential value of metabolomic profiles as biomarkers of aging.
+
+
+

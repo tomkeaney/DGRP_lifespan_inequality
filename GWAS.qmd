@@ -1,0 +1,3302 @@
+---
+title: "Genome wide analyses"
+format: html
+editor: source
+execute:
+  warning: false
+  message: false
+---
+
+# Load packages
+
+Note that the `MASS` package is required to run the CPASSOC. Unfortunately this clashes with the `dplyr` `select()`. So be prepared to run `detach("package:MASS", unload=TRUE)` or use `dplyr::select()` to get some things to work if you're moving back and forth throughout the code.
+
+```{r}
+#| results: hide
+
+library(tidyverse) # tidy coding, ggplot etc
+library(glue) # for coding within strings
+library(bigsnpr) # to install:   devtools::install_github("privefl/bigsnpr")
+library(pander) # for tables
+library(future.apply) # for parallel code running
+library(brms) # for bayesian models
+library(ggtext) # for markdown syntax in ggplot
+library(MetBrewer) # for more colour palettes
+library(MoMAColors) # nicer colours once again
+library(PNWColors) # further nicer colours
+library(patchwork) # building composite plots
+library(DT) # for nice tables
+library(kableExtra) # for more nice tables
+library(ggrepel) # for labelling ggplots
+library(pheatmap) # for heat maps
+library(MASS) # needed for CPASSOC
+library(Matrix) # needed for CPASSOC
+library(flexsurv) # needed for sampling from the gompertz distribution
+
+# build a helper function that produces a table to display our data
+
+# Create a function to build HTML searchable tables
+
+my_data_table <- function(df){
+  datatable(
+    df, rownames=FALSE,
+    autoHideNavigation = TRUE,
+    extensions = c("Scroller",  "Buttons"),
+    options = list(
+      autoWidth = TRUE,
+      dom = 'Bfrtip',
+      deferRender=TRUE,
+      scrollX=TRUE, scrollY=1000,
+      scrollCollapse=TRUE,
+      buttons =
+        list('pageLength', 'colvis', 'csv', list(
+          extend = 'pdf',
+          pageSize = 'A4',
+          orientation = 'landscape',
+          filename = 'Lifespan_data')),
+      pageLength = 100
+    )
+  )
+}
+
+```
+
+# Building the dataset
+
+Here's the raw data from each study. This was then passed `here (part one)` and later returned to conduct GWAS. The dataset has >185,000 rows (one row for each individual) so we don't directly show it in this report. However, it can be downloaded from the data folder found in the [github repository](https://github.com/tomkeaney/DGRP_lifespan_inequality) associated with this analysis.
+
+```{r}
+#| results: hide
+
+
+# Load genotyped lines reported in Huang et al for cross-matching and filtering
+
+genotyped_lines <- read_csv("data/Input/Genotyped_lines.csv") %>% 
+  mutate(line = as.factor(line),
+         Genotyped = "YES")
+
+# Load the lifespan datasets 
+
+Arya_raw_data <- read_csv("data/Input/Raw_data/Arya_2010.csv") %>% 
+  mutate(Sex = if_else(Sex == "F", "Female", "Male")) %>% 
+  mutate(line = as.factor(line),
+         Sex = as.factor(Sex),
+         Vial_ID = as.factor(Vial_ID),
+         Block = as.factor(Block),
+         Diet = as.numeric(Diet),
+         Adult_age_at_start = 2,
+         Social_group_size = Density,
+         Density = Density / 47,
+         Death_day = Lifespan,
+         Lifespan = Death_day + Adult_age_at_start) %>% 
+  dplyr::select(line, Sex, Vial_ID, Lifespan, Adult_age_at_start, Death_day, Block, Study, Temperature, Diet, Social_group_size, Density, Mated, Prop_female)
+
+Arya_lines <- Arya_raw_data %>% distinct(line) %>% inner_join(genotyped_lines) %>%  nrow() # differs from Ivanov because they collected a little bit more data in that study and combined with Ivanov. Those data were not emailed.
+
+Huang_raw_data <- read_csv("data/Input/Raw_data/Huang_2020.csv") %>% 
+  dplyr::select(-Vial_ID2) %>% 
+  mutate(line = as.factor(Line),
+         Sex = as.factor(Sex),
+         Vial_ID = as.factor(Vial_ID),
+         Block = as.factor(Block),
+         Diet = as.numeric(Diet),
+         Study = "Huang_2020",
+         Adult_age_at_start = 1,
+         Social_group_size = Density,
+         Density = Density / 47,
+         Death_day = Lifespan,
+         Lifespan = Death_day + Adult_age_at_start) %>% 
+  dplyr::select(line, Sex, Vial_ID, Lifespan, Adult_age_at_start, Death_day, Block, Study, Temperature, Diet, Social_group_size, Density, Mated, Prop_female)
+
+Huang_lines <- Huang_raw_data %>% distinct(line) %>% inner_join(genotyped_lines) %>% nrow() # perfect match with study
+
+Wilson_raw_data <- read_csv("data/Input/Raw_data/Wilson_2020.csv") %>% 
+  rename(Vial_ID = Replicate,
+         Block = Week) %>% 
+  mutate(line = as.factor(Line),
+         Sex = as.factor(Sex),
+         Vial_ID = as.factor(Vial_ID),
+         Block = as.factor(Block),
+         Diet = as.numeric(Diet),
+         Adult_age_at_start = 2,
+         Social_group_size = Density,
+         Density = Density / 47,
+         Death_day = Lifespan,
+         Lifespan = Death_day + Adult_age_at_start) %>% 
+  dplyr::select(line, Sex, Vial_ID, Lifespan, Adult_age_at_start, Death_day, Block, Study, Temperature, Diet, Social_group_size, Density, Mated, Prop_female)
+
+Wilson_lines <- Wilson_raw_data %>% distinct(line) %>% inner_join(genotyped_lines) %>%  nrow()
+
+
+Durham_raw_data <- read_csv("data/Input/Raw_data/Durham_2014.csv") %>% 
+  dplyr::select(1:4, 6, 14:18) %>% 
+  rename(Vial_ID = Fly_ID) %>% 
+  mutate(Sex = "Female") %>% 
+  mutate(line = as.factor(Line),
+         Sex = as.factor(Sex),
+         Vial_ID = as.factor(Vial_ID),
+         Block = as.factor(Block),
+         Diet = as.numeric(Diet),
+         Adult_age_at_start = 0,
+         Social_group_size = Density,
+         Density = Density / 47,
+         Death_day = Lifespan,
+         Lifespan = Death_day + Adult_age_at_start) %>% 
+  dplyr::select(line, Sex, Vial_ID, Lifespan, Adult_age_at_start, Death_day, Block, Study, Temperature, Diet, Social_group_size, Density, Mated, Prop_female)
+
+Durham_lines <- Durham_raw_data %>% distinct(line) %>% anti_join(genotyped_lines) %>%  nrow()
+
+Patel_raw_data <- read_csv("data/Input/Raw_data/Patel_2021.csv") %>% 
+  left_join(read_csv("data/Input/Raw_data/Patel_2021.csv") %>% distinct(Line) %>% mutate(Vial_ID = 1:n())) %>% 
+  mutate(Diet = 4,
+         line = str_remove(Line, "DGRP "),
+         line = as.factor(line),
+         Sex = as.factor(Sex),
+         Vial_ID = as.factor(Vial_ID),
+         Block = as.factor(Block),
+         Diet = as.numeric(Diet),
+         Adult_age_at_start = 2,
+         Social_group_size = Density,
+         Density = Density / 47,
+         Death_day = Lifespan,
+         Lifespan = Death_day + Adult_age_at_start) %>% 
+  dplyr::select(line, Sex, Vial_ID, Lifespan, Adult_age_at_start, Death_day, Block, Study, Temperature, Diet, Social_group_size, Density, Mated, Prop_female)
+
+# follow up
+
+Patel_lines <- Patel_raw_data %>% distinct(line) %>% inner_join(genotyped_lines) %>% nrow()
+  
+  
+Dick_raw_data <- read_csv("data/Input/Raw_data/Dick_2011_tidy.csv") %>% 
+  dplyr::select(-Replicate) %>% 
+  mutate(line = as.factor(Line),
+         Sex = as.factor(Sex),
+         Vial_ID = as.factor(Vial_ID),
+         Block = as.factor(Block),
+         Diet = as.numeric(Diet),
+         Adult_age_at_start = 0,
+         Social_group_size = Density,
+         Density = Density / 150,
+         Death_day = Lifespan,
+         Lifespan = Death_day + Adult_age_at_start) %>% 
+  dplyr::select(line, Sex, Vial_ID, Lifespan, Adult_age_at_start, Death_day, Block, Study, Temperature, Diet, Social_group_size, Density, Mated, Prop_female)
+
+Dick_lines <- Dick_raw_data %>% distinct(line) %>% inner_join(genotyped_lines) %>% nrow()
+  
+Hoffman_raw_data <- read_csv("data/Input/Raw_data/tidy_Hoffman_2021.csv") %>% 
+  rename(Vial_ID = Vial) %>% 
+  mutate(Sex = if_else(Sex== "F", "Female", "Male")) %>% 
+  mutate(line = as.factor(Line),
+         Sex = as.factor(Sex),
+         Vial_ID = as.factor(Vial_ID),
+         Block = as.factor(Block),
+         Diet = as.numeric(Diet),
+         Adult_age_at_start = 5,
+         Social_group_size = Density,
+         Density = Density / 47,
+         Death_day = Lifespan,
+         Lifespan = Death_day + Adult_age_at_start) %>% 
+  dplyr::select(line, Sex, Vial_ID, Lifespan, Adult_age_at_start, Death_day, Block, Study, Temperature, Diet, Social_group_size, Density, Mated, Prop_female)
+
+Hoffman_lines <- Hoffman_raw_data %>% distinct(line) %>% inner_join(genotyped_lines) %>% nrow()
+
+Zhao_raw_data <- read_csv("data/Input/Raw_data/tidy_Zhao_2022.csv") %>% 
+  rename(Vial_ID = Vial) %>% 
+  mutate(line = as.factor(Line),
+         Sex = as.factor(Sex),
+         Vial_ID = as.factor(Vial_ID),
+         Block = as.factor(Block),
+         Diet = as.numeric(10),
+         Adult_age_at_start = 0, # they were 3 days old upon entrance, but this is already accounted for in the death day measure
+         Social_group_size = Density,
+         Density = Density / 47,
+         Death_day = Lifespan,
+         Lifespan = Death_day + Adult_age_at_start) %>% 
+  dplyr::select(line, Sex, Vial_ID, Lifespan, Adult_age_at_start, Death_day, Block, Study, Temperature, Diet, Social_group_size, Density, Mated, Prop_female)
+
+Zhao_lines <- Zhao_raw_data %>% distinct(line) %>% inner_join(genotyped_lines) %>% nrow()
+
+# combine them into a single tibble
+
+All_raw_data <- 
+  bind_rows(Arya_raw_data,
+            Huang_raw_data,
+            Wilson_raw_data,
+            Durham_raw_data,
+            Patel_raw_data,
+            Dick_raw_data,
+            Hoffman_raw_data,
+            Zhao_raw_data) %>% 
+  filter(!is.na(Lifespan)) %>% 
+  rename(Yeast_percentage = Diet) %>% 
+  left_join(genotyped_lines, by = "line") %>% 
+    mutate(Genotyped = if_else(is.na(Genotyped), "NO", Genotyped),
+           Density = round(Density, 3))
+
+# write_csv(All_raw_data, file ="data/Input/all_raw_data.csv")
+
+#my_data_table(All_raw_data)
+```
+
+If you load the data, it will have the following columns
+
+`line`: the DGRP line (genotype)
+
+`Sex`: is the fly a female or a male?
+
+`Vial_ID`: in many of the studies, multiple flies were kept together in the same environment. It is common practice to record which flies shared the same environment, because a common environment can explain why some flies might exhibit similar lifespan e.g. if humidity is slightly lower in one environment than another, an increased risk of desiccation is shared by all flies in that environment. It is called Vial_ID because the most common way to house Drosophila is in cylindrical vials.
+
+`Lifespan`: the number of days the fly survived as an adult.
+
+`Adult_age_at_start`: often, a few days elapsed before adult flies entered the lifespan assay. Thus, for comparison across studies, it is important to add these days to the Death_day count to find the true adult lifespan.
+
+`Death_day`: the number of days the fly survived as an adult, that were tracked by the lifespan assay.
+
+`Block`: because of the large number of DGRP lines, often studies split their experiment into separate blocks, each of which assays a fraction of the total number of lines. These blocks are temporally separated, and generally deal with different generations of flies. Note that blocks are rarely balanced with respect to line e.g. all the sampling of line 10 is done in block 1.
+
+`Study`: the study that first reports the data.
+
+`Temperature`: the temperature, in degrees Celsius, that the lifespan assay was completed at. 
+
+`Yeast_percentage`: the overall % of the food recipe made up by brewers yeast. This is a common ingredient in _Drosophila_ food, and the key source of protein. Several studies in our dataset were specifically interested in restriction of protein availability as a method to extend lifespan.  
+
+`Social_group_size`: the number of flies housed together in a vial (or bottle), at the onset of the fitness assay. As individuals died, social group sizes decreased.
+
+`Density`: the number of flies per cm^3 of available space. Calculated as Social_group_size / 47cm^3 for _Drosophila_ vials and Social_group_size / 150cm^3 for _Drosophila_ bottles.
+
+`Mated`: across our identified studies, three mating states were used in the lifespan assays. Flies were either kept as virgins for their entire lives (Mated = NO), were allowed to mate for a short period prior to the lifespan assay (Mated = Prior to assay), or kept in mixed sex groups and thus allowed to mate throughout their lives. 
+
+`Prop_female`: the proportion of females kept within each environment.
+
+`Genotyped`: indicates whether the DGRP line has sequence data available. Most do, but a few lines included in the early studies (pre-2012) did not end up getting genotyped. 
+
+# Loading required data
+
+In part 1 of this study, we calculated mean values and standard error for each combination of line, sex, study, temperature and mating status. These data are displayed, and can be downloaded from, the below table. Note that for GWA and other SNP based analysis, we removed lines that had not been genotyped (shown as `Genotyped = NO`). 
+
+```{r}
+#| results: hide
+
+full_dataset <- 
+  read_csv("data/input/line_means.csv") %>% 
+  mutate(line = as.factor(Line),) %>%
+  dplyr::select(-Line) %>% 
+  left_join(genotyped_lines, by = "line") %>% 
+  mutate(Genotyped = if_else(is.na(Genotyped), "NO", Genotyped))
+
+my_data_table(full_dataset)
+```
+
+For CPASSOC, we split the data into their respective treatments. For the purposes of this analysis, we follow a common convention in quantitative genetics and consider each lifespan measurement a separate trait e.g. lifespan at 25 degrees is a separate trait from lifespan at 18 degrees.
+
+```{r}
+Arya_2010_f <-
+full_dataset %>% 
+  filter(Study == "Arya_2010" & Sex == "Female" & Genotyped == "YES")
+
+Arya_2010_m <-
+full_dataset %>% 
+  filter(Study == "Arya_2010" & Sex == "Male" & Genotyped == "YES")
+
+Huang_2020_f_18 <-
+  full_dataset %>% 
+  filter(Study == "Huang_2020" & Sex == "Female" & Temperature == 18)
+
+Huang_2020_m_18 <-
+  full_dataset %>% 
+  filter(Study == "Huang_2020" & Sex == "Male" & Temperature == 18)
+
+Huang_2020_f_25 <-
+  full_dataset %>% 
+  filter(Study == "Huang_2020" & Sex == "Female" & Temperature == 25)
+
+Huang_2020_m_25 <-
+  full_dataset %>% 
+  filter(Study == "Huang_2020" & Sex == "Male" & Temperature == 25)
+
+Huang_2020_f_28 <-
+  full_dataset %>% 
+  filter(Study == "Huang_2020" & Sex == "Female" & Temperature == 28)
+
+Huang_2020_m_28 <-
+  full_dataset %>% 
+  filter(Study == "Huang_2020" & Sex == "Male" & Temperature == 28)
+
+Wilson_2020_f <-
+  full_dataset %>% 
+  filter(Study == "Wilson_2020") %>% 
+  distinct(line, .keep_all = TRUE)
+
+Durham_2014_f <-
+  full_dataset %>% 
+  filter(Study == "Durham_2014") %>% 
+  distinct(line, .keep_all = T)
+
+Patel_2021_f <-
+  full_dataset %>% 
+  filter(Study == "Patel_2021")
+
+```
+
+We also load the residual line means for each sex, which are the line means after controlling for temperature, mating status and the Study_ID random effect.
+
+```{r}
+residual_means <- 
+  read_csv("data/Input/MCMC_residuals.csv") %>% 
+  mutate(line = as.factor(line)) %>% 
+  inner_join(genotyped_lines) %>% 
+  rename(e0 = res_e0,
+         h = res_h)
+
+```
+
+
+# Performing univariate GWAS
+
+The preparation of data for GWAS is adapted from Holman and Wong's DGRP GWAS of fitness in different contexts. See their associated `workflowr` [report](https://lukeholman.github.io/fitnessGWAS/index.html) for a comprehensive breakdown of their analysis.
+
+## Install neccessary software and build helper functions
+
+In addition to the `R` packages we load, `plink 1.9` and `beagle` must also be installed. These software packages allow us to wrangle the data into the correct format and impute missing values, both of which are required to run GWAS with the `Gemma` R package.
+
+```{r}
+
+# build a function to prepare data for GWAS
+
+prep_for_e0_GWAS <- function(data, sex){
+data %>% 
+  #inner_join(read_csv("data/Input/Genotyped_lines.csv"), by = "line") %>%  # filter to lines that have been genotyped
+  mutate(line = glue("line{line}")) %>% 
+  dplyr::select(line, e0) %>% 
+    mutate(e0 = scale(e0))
+}
+
+prep_for_h_GWAS <- function(data, sex){
+data %>% 
+  #inner_join(read_csv("data/Input/Genotyped_lines.csv"), by = "line") %>%  # filter to lines that have been genotyped
+  mutate(line = glue("line{line}")) %>% 
+  dplyr::select(line, h) %>% 
+    mutate(h = scale(h))
+}
+
+prep_for_SA_GWAS <- function(data){
+data %>% 
+  dplyr::select(line, SA_axis)
+}
+
+# I used bigsnpr::download_plink(dir = "code") which puts it in the code folder - I'm using a windows operating system.
+
+# Beagle is a software package for phasing genotypes and imputing ungenotyped markers.
+
+plink <- paste(getwd(), "code/plink", sep = "/")
+#beagle <- bigsnpr::download_beagle() unocmment to download
+
+
+# # Load the wolbachia infection status data from the DGRP website
+# wolbachia <- read_csv("data/input/wolbachia.csv") %>% 
+#   mutate(line = paste("line", line, sep = ""))
+# 
+# # Load the chomosomal inversion data from the DGRP website
+# # these are the 5 inversions that Huang et al. PNAS corrected for
+# inversions <- read_csv("data/input/inversion genotypes.csv") %>%
+#     mutate(line = paste("line", line, sep = "")) %>%
+#     select(line, `In(2L)t`, `In(2R)NS`, `In(3R)P`, `In(3R)K`, `In(3R)Mo`) 
+
+# helper function to pass commands to the terminal
+# Note that we set `intern = TRUE`, and pass the result of `system()` to `cat()`, 
+# ensuring that the Terminal output will be printed in this knitr report.
+# 
+# This is the mac OS function
+ 
+#run_command <- function(shell_command, wd = getwd(), path = ""){
+#  cat(system(glue("cd ", wd, path, # tell terminal which directory to work in
+#                  "\n",shell_command), # on a second terminal line, run the plink command
+#             intern = TRUE), sep = '\n')  
+#}
+
+# This is the windows function 
+
+run_command <- function(plink_command, wd = getwd(), path = "") {
+  # Specify the full path to the plink executable within the 'code' subdirectory.
+  plink_path <- paste(getwd(), "code/plink", sep = "/")
+  
+  # Create the full shell command with the plink executable.
+  command <- glue("cmd.exe /c cd /d {shQuote(file.path(wd, path))} && {shQuote(plink_path)} {plink_command}")
+  
+  # Execute the combined command.
+  result <- system(command, intern = TRUE)
+  
+  # Print the result.
+  cat(result, sep = '\n')
+  
+  # Return the result as a character vector.
+  return(result)
+}
+
+# sometimes we need to run terminal commands without plink - create a slightly different function to do this
+
+run_command_no_plink <- function(shell_command, wd = getwd(), path = "") {
+  
+  # Create the full shell command with the plink executable.
+  command <- glue("cmd.exe /c cd /d {shQuote(file.path(wd, path))} && {shell_command}")
+  
+  # Execute the combined command.
+  result <- system(command, intern = TRUE)
+  
+  # Print the result.
+  cat(result, sep = '\n')
+  
+  # Return the result as a character vector.
+  return(result)
+}
+
+
+```
+
+## Build a function to create manhattan plots for later
+
+```{r}
+build_manhattan_plot <- function(gwas_results){
+  
+  manhattan_data <- gwas_results %>%
+    mutate(position = str_split(SNP, "_"), # split the SNP name into logical bits
+           chr = map_chr(position, ~ .x[1]), # the first bit is the chromosome arm - name the column appropriately
+           position = as.numeric(map_chr(position, ~ .x[2])), # where on the chromosome is the SNP found
+           pval = -1 * log10(P)) %>% # make visualising the p values easier
+    dplyr::select(chr, position, pval) %>% 
+    filter(chr != "4")
+  
+  # this next chunk finds convenient cuts for labels and colour changes 
+  
+  max_pos <- manhattan_data %>%
+    group_by(chr) %>%
+    summarise(
+      max_pos = max(position), 
+      middle_pos = (max_pos - min(position)) / 2,
+      .groups = "drop") %>%
+    as.data.frame()
+  
+  max_pos$max_pos <- c(0, cumsum(max_pos$max_pos[1:4]))
+  
+  max_pos$label_pos <- max_pos$max_pos + max_pos$middle_pos
+  
+  # combine the two dataframes created above
+  
+  manhattan_data <- manhattan_data %>%
+    left_join(max_pos, by = "chr") %>%
+    mutate(position = position + max_pos,
+           chromosome_colour = case_when(chr == "2L" | chr == "3L" | chr == "X" ~ "A",
+                                         .default = "B"),
+           Notable = if_else(pval >= -log10(0.00000005), "YES", "NO"))
+  
+  plot <- manhattan_data %>%
+    #filter(Notable == "NO") %>% 
+    ggplot(aes(position, pval, group = chr, stroke = 0.01)) +
+    geom_point(aes(colour = chromosome_colour), size = 1.6) +
+    geom_hline(yintercept = -log10(0.00000005), linetype = 2, colour = "red", linewidth = 1.2) +
+    geom_hline(yintercept = -log10(0.00005), linetype = 2, colour = "orange", linewidth = 1.2) +
+    scale_colour_manual(values = c(met.brewer(name = "Hokusai3")[3], met.brewer(name = "Hokusai3")[6])) +
+    #geom_label_repel(data = manhattan_data %>% filter(common_SNP == "YES" &),  
+     #              aes(label = position, fill = "aliceblue")) +
+    #geom_point(data = manhattan_data %>% filter(Notable == "YES"),
+     #          fill = "aliceblue", size = 3, 
+      #         shape = 21, colour = "grey2") +
+    scale_x_continuous(breaks = max_pos$label_pos, labels = max_pos$chr) +
+    scale_y_continuous(expand = c(0,0)) +
+    ylab("-log~10~(_p_)") + 
+    xlab("Chromosome and position") +
+    theme_classic() +
+    theme(legend.position = "none",
+          axis.title.y = element_markdown(size = 18),
+          axis.title.x = element_markdown(size = 18),
+          axis.text.x = element_text(size = 15),
+          axis.text.y = element_text(size = 15))  
+}
+
+```
+
+
+## Perform SNP quality control and impute missing data
+
+We cleaned up the DGRP’s .bed/.bim/.fam files (available from the Mackay lab [website](http://dgrp2.gnets.ncsu.edu/)) by:
+
+1. Removing any SNPs for which genotypes are missing for >10% of the DGRP lines. We then use the software Beagle to impute the remaining missing genotypes. Imputation takes a long time so ideally, you only want to do it once.
+
+2. Removing SNPs with a minor allele frequency of less than 5%. We have negilible power to detect associations for rare SNPs below this threshold.
+
+In the PLINK-formatted genotype files, lines fixed for the major allele are coded as 2, and lines fixed for the minor allele as 0. This means that in the association tests we calculate, negative effect sizes mean that the minor allele is associated with lower trait values, while positive effect sizes means that the minor allele is associated with higher trait values.
+
+```{r}
+
+Run_function <- FALSE # Change this to TRUE to run the models
+
+# If the imputation is not already done, create the following 3 files of imputed genotype data: 
+# dgrp2_QC_all_lines_imputed_correct.bed/bim/fam
+if(!file.exists("data/Derived/dgrp2_QC_all_lines_imputed_correct.bed")) {
+  perform_SNP_QC_and_imputation(phenotypes = predicted_line_means)
+}
+
+if(Run_function){
+  
+  # Use Plink to clean and subset the DGRP's SNP data as follows:
+  # Only keep SNPs for which at least 90% of DGRP lines were successfully genotyped (--geno 0.1)
+  # Only keep SNPs with a minor allele frequency of 0.05 or higher (--maf 0.05)
+  # Finally, write the processed BIM/BED/FAM files to the data/derived directory
+  
+  output_directory <-  paste(getwd(), "data/Derived", sep = "/")
+  
+  run_command(glue("--bfile dgrp2",
+                   " --geno 0.1 --maf 0.05 --allow-no-sex", 
+                   " --make-bed --out {shQuote(output_directory)}/dgrp2_QC_all_lines"), path = "data/Input/")
+  
+  # Use the shell command 'sed' to remove underscores from the DGRP line names in the .fam file (e.g. 'line_120' becomes 'line120')
+  # Otherwise, these underscores cause trouble when we need to convert from PLINK to vcf format (vcf format uses underscore as a separator)
+  # I manually edited the text file to do this rather than using the below command, which I don't have quite working
+  #for(i in 1:2) run_command_no_plink("sed -i '' 's/_//' dgrp2_QC_all_lines.fam", path = "/data/Derived/")
+                
+  
+  # Now impute the missing genotypes using Beagle
+  # This part uses the data for the full DGRP panel of >200 lines, to infer missing genotypes as accurately as possible. 
+  # This step uses a lot of memory (max memory was set to 28MB in prior analysis, and it used 26.5GB), but maybe it can also run on a less powerful computer?
+  # The bigsnpr package provides a helpful wrapper for Beagle called snp_beagleImpute(): it translates to a VCF file and back again using PLINK
+  snp_beagleImpute(beagle, plink, 
+                   bedfile.in = "data/Derived/dgrp2_QC_all_lines.bed", 
+                   bedfile.out = "data/Derived/dgrp2_QC_all_lines_imputed.bed",
+                   ncores = 4, 
+                   memory.max = 16)
+  
+  # assign a sex of 'female' to all the DGRP lines (Beagle removes the sex, and it seems PLINK needs individuals to have a sex, 
+  # despite PLINK having a command called --allow-no-sex)
+  run_command("sed -i '' 's/    0   0   0/  0   0   2/' dgrp2_QC_all_lines_imputed.fam", path = "/data/Derived/")
+  
+  # Re-write the .bed file, to make sure the MAF threshold and minor/major allele designations are correctly assigned post-Beagle
+  run_command(glue("--bfile dgrp2_QC_all_lines_imputed",
+                   " --geno 0.1 --maf 0.05 --allow-no-sex", 
+                   " --make-bed --out dgrp2_QC_all_lines_imputed_correct"), path = "/data/Derived/")
+  #unlink(list.files("data/derived", pattern = "~", full.names = TRUE)) # delete the original files, which were given a ~ file name by PLINK
+} else "Already run"
+```
+
+## Create a reduced list of LD-pruned SNPs with PLINK
+
+To keep the computation time and memory usage manageable, we do not save the effect sizes for every variant (SNPs and indels) that passed the MAF and missingness quality control step above (1,646,672 variants). Instead, we save the effect sizes for a subset of variants that were approximately in linkage disequilibrium. We identified this LD-pruned set of variants using the PLINK arguments `--indep-pairwise 100 10 0.2`, which prunes within 100kB sliding windows, sliding 10 variants along with each step, and allows a maximum pairwise $r^2$ threshold of 0.2 between loci. With these parameters, 1,419,902 variants were removed, leaving 226,770 for downstream analysis. Subsequent inspection of the Manhattan plots suggests that this method removes most (but perahps not all) variants that are in complete or high LD.
+
+```{r}
+
+# indep-pairwise arguments are: 
+# 100kB window size, 
+# variant count to shift the window by 10 variants at the end of each step, 
+# pairwise r^2 threshold of 0.2
+
+if(!file.exists("data/Derived/dgrp2_QC_all_lines_imputed_correct.bed")) {
+  run_command(glue("--bfile dgrp2_QC_all_lines_imputed_correct",
+                 " --indep-pairwise 100 10 0.2"), path = "data/Derived/")
+}
+
+```
+
+## Build GWAS function
+
+Note: because PLINK defines the minor allele as the alternative allele (lines fixed for the minor allele are scored as genotype: 2, and those with the major allele as genotype: 0), a _positive_ effect size in these association tests means the _minor_ allele is associated with a _higher_ value of the trait in question.
+
+```{r}
+run_GWAS <- function(phenotypes){
+  
+  # Make a list of the lines in our sample and save as a text file for passing to PLINK
+  lines_to_keep <- phenotypes %>% dplyr::select(line) %>% mutate(line_2 = line)
+  write.table(lines_to_keep, 
+              row.names = FALSE, 
+              col.names = FALSE, 
+              file = "data/Derived/lines_to_keep.txt", 
+              quote = FALSE)
+
+  # Now cull the PLINK files to just the lines that we measured, and re-apply the 
+  # MAF cut-off of 0.05 for the new smaller sample of DGRP lines
+  run_command(glue("--bfile dgrp2_QC_all_lines_imputed_correct",
+                   " --keep-allele-order", # force PLINK to retain the major/minor allele designations that apply to the DGRP as a whole
+                   " --keep lines_to_keep.txt --geno 0.1 --maf 0.05", 
+                   " --make-bed --out dgrp2_QC_focal_lines"), path = "/data/Derived/")
+  
+    # Define a function to add our phenotype data to a .fam file, which is needed for GWAS analysis and to make sure PLINK includes these samples
+  # The 'phenotypes' data frame needs to have a column called 'line'
+  add_phenotypes_to_fam <- function(filepath, phenotypes){
+    read_delim(filepath, col_names = FALSE, delim = " ") %>% 
+      dplyr::select(X1, X2, X3, X4, X5) %>% # Get all the non-phenotype columns
+      left_join(phenotypes, 
+                by = c("X1" = "line")) %>%
+      write.table(file = "data/Derived/dgrp2_QC_focal_lines_NEW.fam", 
+                  col.names = FALSE, row.names = FALSE, 
+                  quote = FALSE, sep = " ")
+    
+    unlink("data/Derived/dgrp2_QC_focal_lines.fam")
+    file.rename("data/Derived/dgrp2_QC_focal_lines_NEW.fam", 
+                "data/Derived/dgrp2_QC_focal_lines.fam")
+  }
+  
+  # edit the new FAM file to add the phenotype data from 'phenotypes'
+  add_phenotypes_to_fam("data/Derived/dgrp2_QC_focal_lines.fam", phenotypes)
+  
+
+  # Run mixed-model GWAS (in practice, the relatedness between almost all pairs of lines 
+  # is sufficiently low that PLINK always instead chooses to run a linear model)
+  
+  run_command("--bfile dgrp2_QC_focal_lines  --assoc --maf 0.05", 
+              path = "/data/Derived")
+  
+  # wrangle the GWAS results
+  
+  Focal_name <- deparse(substitute(phenotypes))
+  
+  gwas_results <- read.table("data/Derived/plink.qassoc", 
+                             header = TRUE) %>% 
+    dplyr::select(SNP, BETA, SE, "T", P)
+
+  # Save a file containing all SNPs with P < 1e-5:
+  gwas_results %>% 
+    filter(P < 1e-05) %>% 
+    write_tsv(glue("data/Derived/GWAS_results/{Focal_name}_significant_SNPs.tsv.gz"))
+
+  # Rename and compress the GWAS summary stats file 
+  # The filter step means that only variants in the LD-pruned subset get saved to disk.
+  gwas_results %>% 
+    filter(SNP %in% (pull(read_tsv("data/Derived/plink.prune.in", col_names = "SNP"), SNP))) %>% 
+    write_tsv(glue("data/Derived/GWAS_results/{Focal_name}.tsv.gz"))
+  unlink("data/Derived/plink.qassoc")
+  
+  # Rename the plink log file
+  file.rename("data/Derived/plink.log",
+              glue("data/Derived/{Focal_name}_log.txt"))
+  
+  unlink("data/Derived/dgrp2_QC_focal_lines.bim")
+  unlink("data/Derived/dgrp2_QC_focal_lines.bed")
+  unlink("data/Derived/dgrp2_QC_focal_lines.fam")
+  unlink("data/Derived/dgrp2_QC_focal_lines.log")
+} 
+        
+```
+
+## Run GWAS
+
+```{r}
+
+Arya_f_l <- prep_for_e0_GWAS(Arya_2010_f)
+Arya_m_l <- prep_for_e0_GWAS(Arya_2010_m)
+Arya_f_h <- prep_for_h_GWAS(Arya_2010_f)
+Arya_m_h <- prep_for_h_GWAS(Arya_2010_m)
+Huang_f_18_l <- prep_for_e0_GWAS(Huang_2020_f_18)
+Huang_f_18_h <- prep_for_h_GWAS(Huang_2020_f_18)
+Huang_m_18_l <- prep_for_e0_GWAS(Huang_2020_m_18)
+Huang_m_18_h <- prep_for_h_GWAS(Huang_2020_m_18)
+Huang_f_25_l <- prep_for_e0_GWAS(Huang_2020_f_25)
+Huang_f_25_h <- prep_for_h_GWAS(Huang_2020_f_25)
+Huang_m_25_l <- prep_for_e0_GWAS(Huang_2020_m_25)
+Huang_m_25_h <- prep_for_h_GWAS(Huang_2020_m_25)
+Huang_f_28_l <- prep_for_e0_GWAS(Huang_2020_f_28)
+Huang_f_28_h <- prep_for_h_GWAS(Huang_2020_f_28)
+Huang_m_28_l <- prep_for_e0_GWAS(Huang_2020_m_28)
+Huang_m_28_h <- prep_for_h_GWAS(Huang_2020_m_28)
+Wilson_f_l <- prep_for_e0_GWAS(Wilson_2020_f)
+Wilson_f_h <- prep_for_h_GWAS(Wilson_2020_f)
+Durham_f_l <- prep_for_e0_GWAS(Durham_2014_f)
+Durham_f_h <- prep_for_h_GWAS(Durham_2014_f)
+Patel_f_l <- prep_for_e0_GWAS(Patel_2021_f)
+Patel_f_h <- prep_for_h_GWAS(Patel_2021_f)
+
+residual_f_l <- prep_for_e0_GWAS(residual_means %>% filter(Sex == "Female"))
+residual_m_l <- prep_for_e0_GWAS(residual_means %>% filter(Sex == "Male"))
+residual_f_h <- prep_for_h_GWAS(residual_means %>% filter(Sex == "Female"))
+residual_m_h <- prep_for_h_GWAS(residual_means %>% filter(Sex == "Male"))
+
+# if not already done, run the GWA tests
+
+if(!file.exists("data/Derived/GWAS_results/Arya_f_l.tsv.gz")) {
+run_GWAS(Arya_f_l)
+run_GWAS(Arya_m_l)
+run_GWAS(Arya_f_h)
+run_GWAS(Arya_m_h)
+run_GWAS(Huang_f_18_l)
+run_GWAS(Huang_f_18_h)
+run_GWAS(Huang_m_18_l)
+run_GWAS(Huang_m_18_h)
+run_GWAS(Huang_f_25_l)
+run_GWAS(Huang_f_25_h)
+run_GWAS(Huang_m_25_l)
+run_GWAS(Huang_m_25_h)
+run_GWAS(Huang_f_28_l)
+run_GWAS(Huang_f_28_h)
+run_GWAS(Huang_m_28_l)
+run_GWAS(Huang_m_28_h)
+run_GWAS(Wilson_f_l)
+run_GWAS(Wilson_f_h)
+run_GWAS(Durham_f_l)
+run_GWAS(Durham_f_h)
+run_GWAS(Patel_f_l)
+run_GWAS(Patel_f_h)
+}
+```
+
+As a point of comparison, we collate the number of significant associations detected by each individual GWAS
+
+```{r}
+# load GWAS results
+
+# Life expectancy
+
+Arya_f_l_GWAS <- read_tsv("data/Derived/GWAS_results/Arya_f_l.tsv.gz") 
+  
+Huang_f_18_l_GWAS <- read_tsv("data/Derived/GWAS_results/Huang_f_18_l.tsv.gz")
+
+Huang_f_25_l_GWAS <- read_tsv("data/Derived/GWAS_results/Huang_f_25_l.tsv.gz") 
+
+Huang_f_28_l_GWAS <- read_tsv("data/Derived/GWAS_results/Huang_f_28_l.tsv.gz")
+
+Wilson_f_l_GWAS <- read_tsv("data/Derived/GWAS_results/Wilson_f_l.tsv.gz") 
+
+Durham_f_l_GWAS <- read_tsv("data/Derived/GWAS_results/Durham_f_l.tsv.gz")
+
+Patel_f_l_GWAS <- read_tsv("data/Derived/GWAS_results/Patel_f_l.tsv.gz")
+
+Arya_m_l_GWAS <- read_tsv("data/Derived/GWAS_results/Arya_m_l.tsv.gz")
+
+Huang_m_18_l_GWAS <- read_tsv("data/Derived/GWAS_results/Huang_m_18_l.tsv.gz")
+
+Huang_m_25_l_GWAS <- read_tsv("data/Derived/GWAS_results/Huang_m_25_l.tsv.gz")
+
+Huang_m_28_l_GWAS <- read_tsv("data/Derived/GWAS_results/Huang_m_28_l.tsv.gz")
+
+# Lifespan equality
+
+Arya_f_h_GWAS <- read_tsv("data/Derived/GWAS_results/Arya_f_h.tsv.gz")
+  
+Huang_f_18_h_GWAS <- read_tsv("data/Derived/GWAS_results/Huang_f_18_h.tsv.gz")
+
+Huang_f_25_h_GWAS <- read_tsv("data/Derived/GWAS_results/Huang_f_25_h.tsv.gz") 
+
+Huang_f_28_h_GWAS <- read_tsv("data/Derived/GWAS_results/Huang_f_28_h.tsv.gz")
+
+Wilson_f_h_GWAS <- read_tsv("data/Derived/GWAS_results/Wilson_f_h.tsv.gz")
+
+Durham_f_h_GWAS <- read_tsv("data/Derived/GWAS_results/Durham_f_h.tsv.gz")
+
+Patel_f_h_GWAS <- read_tsv("data/Derived/GWAS_results/Patel_f_h.tsv.gz")
+
+Arya_m_h_GWAS <- read_tsv("data/Derived/GWAS_results/Arya_m_h.tsv.gz")
+
+Huang_m_18_h_GWAS <- read_tsv("data/Derived/GWAS_results/Huang_m_18_h.tsv.gz")
+
+Huang_m_25_h_GWAS <- read_tsv("data/Derived/GWAS_results/Huang_m_25_h.tsv.gz")
+
+Huang_m_28_h_GWAS <- read_tsv("data/Derived/GWAS_results/Huang_m_28_h.tsv.gz")
+
+```
+
+**Table XX**. Genotype to phenotype associations detected by univariate GWAS, for **life expectancy**. The total row shows the number of unique candidate variants identified across all studies.
+```{r}
+# filter down tp sig associations
+e0_table <-
+bind_rows(
+Arya_f_l_GWAS %>% 
+  filter(P < 0.00005) %>% 
+  transmute(`p < 0.05e-05 variants` = n(),
+         `p < 0.05e-08 variants` = nrow(filter(Arya_f_l_GWAS, P < 0.00000005))) %>%
+  distinct() %>% 
+  mutate(Study = "Arya et al 2010",
+         Sex = "Female",
+         Temperature = "25",
+         `Mating status` = "Virgin") %>% 
+  dplyr::select(Study, Sex, Temperature, `Mating status`, `p < 0.05e-05 variants`, `p < 0.05e-08 variants`),
+  
+  
+Huang_f_18_l_GWAS %>% 
+  filter(P < 0.00005) %>% 
+  transmute(`p < 0.05e-05 variants` = n(),
+         `p < 0.05e-08 variants` = nrow(filter(Huang_f_18_l_GWAS, P < 0.00000005))) %>%
+  distinct() %>% 
+  mutate(Study = "Huang et al 2020",
+         Sex = "Female",
+         Temperature = "18",
+         `Mating status` = "Mated") %>% 
+  dplyr::select(Study, Sex, Temperature, `Mating status`, `p < 0.05e-05 variants`, `p < 0.05e-08 variants`),
+
+Huang_f_25_l_GWAS %>% 
+  filter(P < 0.00005) %>% 
+  transmute(`p < 0.05e-05 variants` = n(),
+         `p < 0.05e-08 variants` = nrow(filter(Huang_f_25_l_GWAS, P < 0.00000005))) %>%
+  distinct() %>% 
+  mutate(Study = "Huang et al 2020",
+         Sex = "Female",
+         Temperature = "25",
+         `Mating status` = "Mated") %>% 
+  dplyr::select(Study, Sex, Temperature, `Mating status`, `p < 0.05e-05 variants`, `p < 0.05e-08 variants`),
+
+Huang_f_28_l_GWAS %>% 
+  filter(P < 0.00005) %>% 
+  transmute(`p < 0.05e-05 variants` = n(),
+         `p < 0.05e-08 variants` = nrow(filter(Huang_f_28_l_GWAS, P < 0.00000005))) %>%
+  distinct() %>% 
+  mutate(Study = "Huang et al 2020",
+         Sex = "Female",
+         Temperature = "28",
+         `Mating status` = "Mated") %>% 
+  dplyr::select(Study, Sex, Temperature, `Mating status`, `p < 0.05e-05 variants`, `p < 0.05e-08 variants`),
+
+Wilson_f_l_GWAS %>% 
+  filter(P < 0.00005) %>% 
+  transmute(`p < 0.05e-05 variants` = n(),
+         `p < 0.05e-08 variants` = nrow(filter(Wilson_f_l_GWAS, P < 0.00000005))) %>%
+  distinct() %>% 
+  mutate(Study = "Wilson et al 2020",
+         Sex = "Female",
+         Temperature = "25",
+         `Mating status` = "Mated") %>% 
+  dplyr::select(Study, Sex, Temperature, `Mating status`, `p < 0.05e-05 variants`, `p < 0.05e-08 variants`),
+
+Durham_f_l_GWAS %>% 
+  filter(P < 0.00005) %>% 
+  transmute(`p < 0.05e-05 variants` = n(),
+         `p < 0.05e-08 variants` = nrow(filter(Durham_f_l_GWAS, P < 0.00000005))) %>%
+  distinct() %>% 
+  mutate(Study = "Durham et al 2014",
+         Sex = "Female",
+         Temperature = "25",
+         `Mating status` = "Mated") %>% 
+  dplyr::select(Study, Sex, Temperature, `Mating status`, `p < 0.05e-05 variants`, `p < 0.05e-08 variants`),
+
+Patel_f_l_GWAS %>% 
+  filter(P < 0.00005) %>% 
+  transmute(`p < 0.05e-05 variants` = n(),
+         `p < 0.05e-08 variants` = nrow(filter(Patel_f_l_GWAS, P < 0.00000005))) %>%
+  distinct() %>% 
+  mutate(Study = "Patel et al 2021",
+         Sex = "Female",
+         Temperature = "23",
+         `Mating status` = "Mated") %>% 
+  dplyr::select(Study, Sex, Temperature, `Mating status`, `p < 0.05e-05 variants`, `p < 0.05e-08 variants`),
+
+Arya_m_l_GWAS %>% 
+  filter(P < 0.00005) %>% 
+  transmute(`p < 0.05e-05 variants` = n(),
+         `p < 0.05e-08 variants` = nrow(filter(Arya_m_l_GWAS, P < 0.00000005))) %>%
+  distinct() %>% 
+  mutate(Study = "Arya et al 2010",
+         Sex = "Male",
+         Temperature = "25",
+         `Mating status` = "Virgin") %>% 
+  dplyr::select(Study, Sex, Temperature, `Mating status`, `p < 0.05e-05 variants`, `p < 0.05e-08 variants`),
+
+Huang_m_18_l_GWAS %>% 
+  filter(P < 0.00005) %>% 
+  transmute(`p < 0.05e-05 variants` = n(),
+         `p < 0.05e-08 variants` = nrow(filter(Huang_m_18_l_GWAS, P < 0.00000005))) %>%
+  distinct() %>% 
+  mutate(Study = "Huang et al 2020",
+         Sex = "Male",
+         Temperature = "18",
+         `Mating status` = "Mated") %>% 
+  dplyr::select(Study, Sex, Temperature, `Mating status`, `p < 0.05e-05 variants`, `p < 0.05e-08 variants`),
+
+Huang_m_25_l_GWAS %>% 
+  filter(P < 0.00005) %>% 
+  transmute(`p < 0.05e-05 variants` = n(),
+         `p < 0.05e-08 variants` = nrow(filter(Huang_m_25_l_GWAS, P < 0.00000005))) %>%
+  distinct() %>% 
+  mutate(Study = "Huang et al 2020",
+         Sex = "Male",
+         Temperature = "25",
+         `Mating status` = "Mated") %>% 
+  dplyr::select(Study, Sex, Temperature, `Mating status`, `p < 0.05e-05 variants`, `p < 0.05e-08 variants`),
+
+Huang_m_28_l_GWAS %>% 
+  filter(P < 0.00005) %>% 
+  transmute(`p < 0.05e-05 variants` = n(),
+         `p < 0.05e-08 variants` = nrow(filter(Huang_m_28_l_GWAS, P < 0.00000005))) %>%
+  distinct() %>% 
+  mutate(Study = "Huang et al 2020",
+         Sex = "Male",
+         Temperature = "28",
+         `Mating status` = "Mated") %>% 
+  dplyr::select(Study, Sex, Temperature, `Mating status`, `p < 0.05e-05 variants`, `p < 0.05e-08 variants`)
+) 
+
+# how many unique variants have been detected?
+p_05_SNPs <-
+  bind_rows(
+    
+    Arya_f_l_GWAS %>% 
+      filter(P < 0.00005),
+    
+    Arya_m_l_GWAS %>% 
+      filter(P < 0.00005),
+    
+    Huang_f_18_l_GWAS %>% 
+      filter(P < 0.00005),
+    
+    Huang_f_25_l_GWAS %>% 
+      filter(P < 0.00005),
+    
+    Huang_f_28_l_GWAS %>% 
+      filter(P < 0.00005),
+    
+    Huang_m_18_l_GWAS %>% 
+      filter(P < 0.00005),
+    
+    Huang_m_25_l_GWAS %>% 
+      filter(P < 0.00005),
+    
+    Huang_m_28_l_GWAS %>% 
+      filter(P < 0.00005),
+    
+    Wilson_f_l_GWAS %>% 
+      filter(P < 0.00005),
+    
+    Durham_f_l_GWAS %>% 
+      filter(P < 0.00005),
+    
+    Patel_f_l_GWAS %>% 
+      filter(P < 0.00005)
+  ) %>% 
+  distinct(SNP) %>% 
+  nrow()
+
+
+e0_table %>% 
+  add_row(Study = "Totals",
+          Sex = "",
+          Temperature = "",
+          `Mating status` = "",
+          `p < 0.05e-05 variants` = p_05_SNPs,
+          `p < 0.05e-08 variants` = sum(e0_table$`p < 0.05e-08 variants`)) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+**Table XX**. Genotype to phenotype associations detected by univariate GWAS, for **lifespan equality**. The total row shows the number of unique candidate variants identified across all studies.
+```{r}
+# filter down tp sig associations
+h_table <-
+bind_rows(
+Arya_f_h_GWAS %>% 
+  filter(P < 0.00005) %>% 
+  transmute(`p < 0.05e-05 variants` = n(),
+         `p < 0.05e-08 variants` = nrow(filter(Arya_f_h_GWAS, P < 0.00000005))) %>%
+  distinct() %>% 
+  mutate(Study = "Arya et al 2010",
+         Sex = "Female",
+         Temperature = "25",
+         `Mating status` = "Virgin") %>% 
+  dplyr::select(Study, Sex, Temperature, `Mating status`, `p < 0.05e-05 variants`, `p < 0.05e-08 variants`),
+  
+  
+Huang_f_18_h_GWAS %>% 
+  filter(P < 0.00005) %>% 
+  transmute(`p < 0.05e-05 variants` = n(),
+         `p < 0.05e-08 variants` = nrow(filter(Huang_f_18_h_GWAS, P < 0.00000005))) %>%
+  distinct() %>% 
+  mutate(Study = "Huang et al 2020",
+         Sex = "Female",
+         Temperature = "18",
+         `Mating status` = "Mated") %>% 
+  dplyr::select(Study, Sex, Temperature, `Mating status`, `p < 0.05e-05 variants`, `p < 0.05e-08 variants`),
+
+Huang_f_25_h_GWAS %>% 
+  filter(P < 0.00005) %>% 
+  transmute(`p < 0.05e-05 variants` = n(),
+         `p < 0.05e-08 variants` = nrow(filter(Huang_f_25_h_GWAS, P < 0.00000005))) %>%
+  distinct() %>% 
+  mutate(Study = "Huang et al 2020",
+         Sex = "Female",
+         Temperature = "25",
+         `Mating status` = "Mated") %>% 
+  dplyr::select(Study, Sex, Temperature, `Mating status`, `p < 0.05e-05 variants`, `p < 0.05e-08 variants`),
+
+Huang_f_28_h_GWAS %>% 
+  filter(P < 0.00005) %>% 
+  transmute(`p < 0.05e-05 variants` = n(),
+         `p < 0.05e-08 variants` = nrow(filter(Huang_f_28_h_GWAS, P < 0.00000005))) %>%
+  distinct() %>% 
+  mutate(Study = "Huang et al 2020",
+         Sex = "Female",
+         Temperature = "28",
+         `Mating status` = "Mated") %>% 
+  dplyr::select(Study, Sex, Temperature, `Mating status`, `p < 0.05e-05 variants`, `p < 0.05e-08 variants`),
+
+Wilson_f_h_GWAS %>% 
+  filter(P < 0.00005) %>% 
+  transmute(`p < 0.05e-05 variants` = n(),
+         `p < 0.05e-08 variants` = nrow(filter(Wilson_f_h_GWAS, P < 0.00000005))) %>%
+  distinct() %>% 
+  mutate(Study = "Wilson et al 2020",
+         Sex = "Female",
+         Temperature = "25",
+         `Mating status` = "Mated") %>% 
+  dplyr::select(Study, Sex, Temperature, `Mating status`, `p < 0.05e-05 variants`, `p < 0.05e-08 variants`),
+
+Durham_f_h_GWAS %>% 
+  filter(P < 0.00005) %>% 
+  transmute(`p < 0.05e-05 variants` = n(),
+         `p < 0.05e-08 variants` = nrow(filter(Durham_f_h_GWAS, P < 0.00000005))) %>%
+  distinct() %>% 
+  mutate(Study = "Durham et al 2014",
+         Sex = "Female",
+         Temperature = "25",
+         `Mating status` = "Mated") %>% 
+  dplyr::select(Study, Sex, Temperature, `Mating status`, `p < 0.05e-05 variants`, `p < 0.05e-08 variants`),
+
+Patel_f_h_GWAS %>% 
+  filter(P < 0.00005) %>% 
+  transmute(`p < 0.05e-05 variants` = n(),
+         `p < 0.05e-08 variants` = nrow(filter(Patel_f_h_GWAS, P < 0.00000005))) %>%
+  distinct() %>% 
+  mutate(Study = "Patel et al 2021",
+         Sex = "Female",
+         Temperature = "23",
+         `Mating status` = "Mated") %>% 
+  dplyr::select(Study, Sex, Temperature, `Mating status`, `p < 0.05e-05 variants`, `p < 0.05e-08 variants`),
+
+Arya_m_h_GWAS %>% 
+  filter(P < 0.00005) %>% 
+  transmute(`p < 0.05e-05 variants` = n(),
+         `p < 0.05e-08 variants` = nrow(filter(Arya_m_h_GWAS, P < 0.00000005))) %>%
+  distinct() %>% 
+  mutate(Study = "Arya et al 2010",
+         Sex = "Male",
+         Temperature = "25",
+         `Mating status` = "Virgin") %>% 
+  dplyr::select(Study, Sex, Temperature, `Mating status`, `p < 0.05e-05 variants`, `p < 0.05e-08 variants`),
+
+Huang_m_18_h_GWAS %>% 
+  filter(P < 0.00005) %>% 
+  transmute(`p < 0.05e-05 variants` = n(),
+         `p < 0.05e-08 variants` = nrow(filter(Huang_m_18_h_GWAS, P < 0.00000005))) %>%
+  distinct() %>% 
+  mutate(Study = "Huang et al 2020",
+         Sex = "Male",
+         Temperature = "18",
+         `Mating status` = "Mated") %>% 
+  dplyr::select(Study, Sex, Temperature, `Mating status`, `p < 0.05e-05 variants`, `p < 0.05e-08 variants`),
+
+Huang_m_25_h_GWAS %>% 
+  filter(P < 0.00005) %>% 
+  transmute(`p < 0.05e-05 variants` = n(),
+         `p < 0.05e-08 variants` = nrow(filter(Huang_m_25_h_GWAS, P < 0.00000005))) %>%
+  distinct() %>% 
+  mutate(Study = "Huang et al 2020",
+         Sex = "Male",
+         Temperature = "25",
+         `Mating status` = "Mated") %>% 
+  dplyr::select(Study, Sex, Temperature, `Mating status`, `p < 0.05e-05 variants`, `p < 0.05e-08 variants`),
+
+Huang_m_28_h_GWAS %>% 
+  filter(P < 0.00005) %>% 
+  transmute(`p < 0.05e-05 variants` = n(),
+         `p < 0.05e-08 variants` = nrow(filter(Huang_m_28_h_GWAS, P < 0.00000005))) %>%
+  distinct() %>% 
+  mutate(Study = "Huang et al 2020",
+         Sex = "Male",
+         Temperature = "28",
+         `Mating status` = "Mated") %>% 
+  dplyr::select(Study, Sex, Temperature, `Mating status`, `p < 0.05e-05 variants`, `p < 0.05e-08 variants`)
+) 
+
+
+# how many unique variants have been detected?
+p_05_SNPs_h <-
+  bind_rows(
+    
+    Arya_f_h_GWAS %>% 
+      filter(P < 0.00005),
+    
+    Arya_m_h_GWAS %>% 
+      filter(P < 0.00005),
+    
+    Huang_f_18_h_GWAS %>% 
+      filter(P < 0.00005),
+    
+    Huang_f_25_h_GWAS %>% 
+      filter(P < 0.00005),
+    
+    Huang_f_28_h_GWAS %>% 
+      filter(P < 0.00005),
+    
+    Huang_m_18_h_GWAS %>% 
+      filter(P < 0.00005),
+    
+    Huang_m_25_h_GWAS %>% 
+      filter(P < 0.00005),
+    
+    Huang_m_28_h_GWAS %>% 
+      filter(P < 0.00005),
+    
+    Wilson_f_h_GWAS %>% 
+      filter(P < 0.00005),
+    
+    Durham_f_h_GWAS %>% 
+      filter(P < 0.00005),
+    
+    Patel_f_h_GWAS %>% 
+      filter(P < 0.00005)
+  ) %>% 
+  distinct(SNP) %>% 
+  nrow()
+
+
+h_table %>% 
+  add_row(Study = "Totals",
+          Sex = "",
+          Temperature = "",
+          `Mating status` = "",
+          `p < 0.05e-05 variants` = p_05_SNPs_h,
+          `p < 0.05e-08 variants` = sum(h_table$`p < 0.05e-08 variants`)) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+# Applying cross-phenotype meta-analysis
+
+## The method
+
+The power to detect variants associated with correlated phenotypes can be increased if a meta-analytic approach is adopted ([Zhu et al, 2018](https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0193256)). Here, we use the CPASSOC approach developed by [Zhou _et al_ (2015)](https://www.sciencedirect.com/science/article/pii/S0002929714004777?via%3Dihub), which evaluates the null hypothesis that SNPs are associated with none of the considered traits, weighted by the sample size of each study and adjusted for the trait correlation matrix. The steps to apply CPASSOC are as follows:
+
+1. Estimate $R$, the trait correlation matrix. In the DGRP, this can be done using SNP data or using line means.
+
+2. GWAS each trait separately (see above).
+
+3. Collate effect sizes for each trait into a vector **$\beta$**, for each SNP.
+
+4. Use a Wald test statistic to estimate a vector of _p_-values, $T$, from the $\beta$ and $\sigma$ (which is approximated from the study sample size) estimates for each SNP.
+
+5. Test whether **$\beta$** = **0**. If the trait data are homogeneous (SNPs are expected to affect all traits in the same direction), use:
+
+$$S_{Hom} = \frac{e^T(RW)^{-1}T(e^T(RW)^{-1}T)^T}{e^T(WRW)^{-1}e}$$
+where $W$ is a diagonal matrix of weights for the individual test statistics (either the inverse of the variance or simply the sample size).
+
+6. If there is heterogeneity between trait measures (i.e. it is a reasonable expectation that SNPs could affect some traits in one direction and others in the opposing direction), $S_{Hom}$ is not appropriate. The ideal test statistic in this case would only include the cohorts and traits with a true contribution to the association of a genetic variant. To implement this, the value $\tau$ is used as a threshold, below which traits are not included in the test statistic. This statistic, $S_{Het}$ can be viewed as the maximum of the weighted sum of trait-specific test statistics satisfying different thresholds. To calculate $S_{Het}$ first find,
+
+$$S_{\tau} = \frac{e^T(R(\tau)W(\tau))^{-1}T(\tau)(e^T(R(\tau)W(\tau))^{-1}T(\tau))^T}{e^TW(\tau)^{-1}R(\tau)^{-1}W(\tau)^{-1}e}$$
+When $\tau$ is large, $S(\tau)$ can be undefined if the test statistic falls below $\tau$ for all cohorts. In this case $S(\tau) = 0$. Our test statistic is then
+
+$$\displaystyle S_{Het} =  \max_{\tau \gt 0} S(\tau)$$
+To generate _p_-values, $S_{Het}$ is then compared with a gamma distribution of test-statistics.
+
+Anyway, I've only included that for the mathematically inclined. Code to implement both statistics in `R` can be downloaded [here](http://hal.case.edu/~xxz10/zhu-web/), and is implemented below.
+
+## The functions
+
+These are directly loaded from [here](http://hal.case.edu/~xxz10/zhu-web/)
+
+```{r}
+require(compiler)
+enableJIT(4)
+
+Non_Trucated_TestScore <- function(X, SampleSize, CorrMatrix)
+{
+  Wi = matrix(SampleSize, nrow = 1);
+  sumW = sqrt(sum(Wi^2));
+  W = Wi / sumW;
+  
+  Sigma = ginv(CorrMatrix);
+  XX = apply(X, 1, function(x) {
+    x1 <- matrix(x, ncol = length(x), nrow = 1);
+    T = W %*% Sigma %*% t(x1);
+    T = (T*T) / (W %*% Sigma %*% t(W));
+    return(T[1,1]);
+  }
+  );
+  return(XX);
+}
+SHom <- cmpfun(Non_Trucated_TestScore);
+
+Trucated_TestScore <- function(X, SampleSize, CorrMatrix, correct = 1, startCutoff = 0, endCutoff = 1, CutoffStep = 0.05, isAllpossible = T)
+{
+  N = dim(X)[2];
+  
+  Wi = matrix(SampleSize, nrow = 1);
+  sumW = sqrt(sum(Wi^2));
+  W = Wi / sumW;
+  
+  XX = apply(X, 1, function(x) {
+    TTT = -1;
+    
+    if (isAllpossible == T ) {
+      cutoff = sort(unique(abs(x)));	  ## it will filter out any of them.
+    } else {
+      cutoff = seq(startCutoff, endCutoff, CutoffStep);
+    }
+    
+    
+    for (threshold in cutoff) {
+      x1 = x;
+      index = which(abs(x1) < threshold);
+      
+      if (length(index) == N) break;
+      
+      A = CorrMatrix;
+      
+      W1 = W;
+      if (length(index) !=0 ) {
+        x1 = x1[-index];
+        A  = A[-index, -index];   ## update the matrix
+        W1 = W[-index];
+      }
+      
+      if (correct == 1)
+      {
+        index = which(x1 < 0);
+        if (length(index) != 0) {
+          W1[index] = -W1[index];    ## update the sign
+        }
+      }
+      
+      A = ginv(A);
+      x1 = matrix(x1, nrow = 1);
+      W1 = matrix(W1, nrow = 1);
+      T = W1 %*% A %*% t(x1);
+      T = (T*T) / (W1 %*% A %*% t(W1));
+      
+      if (TTT < T[1,1]) TTT = T[1,1];
+    }
+    return(TTT);
+  }
+  );
+  return(XX);
+}
+SHet <- cmpfun(Trucated_TestScore);
+
+EstimateGamma <- function (N = 1E6, SampleSize, CorrMatrix, correct = 1, startCutoff = 0, endCutoff = 1, CutoffStep = 0.05, isAllpossible = T) {
+  
+  Wi = matrix(SampleSize, nrow = 1);
+  sumW = sqrt(sum(Wi^2));
+  W = Wi / sumW;
+  
+  Permutation = mvrnorm(n = N, mu = c(rep(0, length(SampleSize))), Sigma = CorrMatrix, tol = 1e-8, empirical = F);
+  
+  Stat =  Trucated_TestScore(X = Permutation, SampleSize = SampleSize, CorrMatrix = CorrMatrix,
+                             correct = correct, startCutoff = startCutoff, endCutoff = endCutoff,
+                             CutoffStep = CutoffStep, isAllpossible = isAllpossible);
+  a = min(Stat)*3/4
+  ex3 = mean(Stat*Stat*Stat)
+  V =	var(Stat);
+  
+  for (i in 1:100){
+    E = mean(Stat)-a;
+    k = E^2/V
+    theta = V/E
+    a = (-3*k*(k+1)*theta**2+sqrt(9*k**2*(k+1)**2*theta**4-12*k*theta*(k*(k+1)*(k+2)*theta**3-ex3)))/6/k/theta
+  }
+  
+  para = c(k,theta,a);
+  return(para);
+}
+
+
+
+EmpDist <- function (N = 1E6, SampleSize, CorrMatrix, correct = 1, startCutoff = 0, endCutoff = 1, CutoffStep = 0.05, isAllpossible = T) {
+  
+  Wi = matrix(SampleSize, nrow = 1);
+  sumW = sqrt(sum(Wi^2));
+  W = Wi / sumW;
+  
+  Permutation = mvrnorm(n = N, mu = c(rep(0, length(SampleSize))), Sigma = CorrMatrix, tol = 1e-8, empirical = F);
+  
+  Stat =  Trucated_TestScore(X = Permutation, SampleSize = SampleSize, CorrMatrix = CorrMatrix, correct = correct, startCutoff = startCutoff, endCutoff = endCutoff, CutoffStep = CutoffStep, isAllpossible = isAllpossible);
+  
+  
+  return(Stat);
+}
+```
+
+
+## Generate the genetic correlation matrix
+
+We calculate the genetic correlations between traits using both the line mean and SNP effect size comparisons. We use the SNP correlations following Zhu et al (2015) and show these in the below plots. Note that while the two approaches produce results that have a strong positive correlation, there are small differences that will affect downstream analyses.
+
+```{r}
+# use the BETA coefficients to build the SNP correlation matrix
+
+SNP_data_e0 <-
+  bind_rows(
+    Arya_f_l_GWAS %>% 
+      mutate(Study = "Arya_2010", Sex = "Female", Temperature = 25),
+    Huang_f_18_l_GWAS %>% 
+      mutate(Study= "Huang_2020", Sex= "Female", Temperature= 18),
+    Huang_f_25_l_GWAS %>% 
+      mutate(Study= "Huang_2020", Sex= "Female", Temperature= 25),
+    Huang_f_28_l_GWAS %>% 
+      mutate(Study= "Huang_2020", Sex= "Female", Temperature= 28),
+    Wilson_f_l_GWAS %>% 
+      mutate(Study= "Wilson_2020", Sex= "Female", Temperature= 25),
+    Durham_f_l_GWAS %>% 
+      mutate(Study= "Durham_2014", Sex= "Female", Temperature= 25),
+    Patel_f_l_GWAS %>% 
+      mutate(Study= "Patel_2021", Sex= "Female", Temperature= 23),
+    Arya_m_l_GWAS %>% 
+      mutate(Study= "Arya_2010", Sex= "Male", Temperature= 25),
+    Huang_m_18_l_GWAS %>% 
+      mutate(Study= "Huang_2020", Sex= "Male", Temperature= 18),
+    Huang_m_25_l_GWAS %>% 
+      mutate(Study= "Huang_2020", Sex= "Male", Temperature = 25),
+    Huang_m_28_l_GWAS %>% 
+      mutate(Study = "Huang_2020", Sex = "Male", Temperature = 28)) %>% 
+  dplyr::select(SNP, BETA, Study, Sex, Temperature) %>% 
+  pivot_wider(values_from = BETA, names_from = c(Study, Sex, Temperature)) %>% 
+  dplyr::select(-SNP) %>% 
+  rename(Arya_f_25 = Arya_2010_Female_25,
+         Huang_f_18 = Huang_2020_Female_18,
+         Huang_f_25 = Huang_2020_Female_25,
+         Huang_f_28 = Huang_2020_Female_28,
+         Wilson_f_25 = Wilson_2020_Female_25,
+         Durham_f_25 = Durham_2014_Female_25,
+         Patel_f_23 = Patel_2021_Female_23,
+         Arya_m_25 = Arya_2010_Male_25,
+         Huang_m_18 = Huang_2020_Male_18,
+         Huang_m_25 = Huang_2020_Male_25,
+         Huang_m_28 = Huang_2020_Male_28)
+
+SNP_data_h <-
+  bind_rows(
+    Arya_f_h_GWAS %>% 
+      mutate(Study = "Arya_2010", Sex = "Female", Temperature = 25),
+    Huang_f_18_h_GWAS %>% 
+      mutate(Study= "Huang_2020", Sex= "Female", Temperature= 18),
+    Huang_f_25_h_GWAS %>% 
+      mutate(Study= "Huang_2020", Sex= "Female", Temperature= 25),
+    Huang_f_28_h_GWAS %>% 
+      mutate(Study= "Huang_2020", Sex= "Female", Temperature= 28),
+    Wilson_f_h_GWAS %>% 
+      mutate(Study= "Wilson_2020", Sex= "Female", Temperature= 25),
+    Durham_f_h_GWAS %>% 
+      mutate(Study= "Durham_2014", Sex= "Female", Temperature= 25),
+    Patel_f_h_GWAS %>% 
+      mutate(Study= "Patel_2021", Sex= "Female", Temperature= 23),
+    Arya_m_h_GWAS %>% 
+      mutate(Study= "Arya_2010", Sex= "Male", Temperature= 25),
+    Huang_m_18_h_GWAS %>% 
+      mutate(Study= "Huang_2020", Sex= "Male", Temperature= 18),
+    Huang_m_25_h_GWAS %>% 
+      mutate(Study= "Huang_2020", Sex= "Male", Temperature = 25),
+    Huang_m_28_h_GWAS %>% 
+      mutate(Study = "Huang_2020", Sex = "Male", Temperature = 28)) %>% 
+  dplyr::select(SNP, BETA, Study, Sex, Temperature) %>% 
+  pivot_wider(values_from = BETA, names_from = c(Study, Sex, Temperature)) %>% 
+  dplyr::select(-SNP) %>%
+  rename(Arya_f_25 = Arya_2010_Female_25,
+         Huang_f_18 = Huang_2020_Female_18,
+         Huang_f_25 = Huang_2020_Female_25,
+         Huang_f_28 = Huang_2020_Female_28,
+         Wilson_f_25 = Wilson_2020_Female_25,
+         Durham_f_25 = Durham_2014_Female_25,
+         Patel_f_23 = Patel_2021_Female_23,
+         Arya_m_25 = Arya_2010_Male_25,
+         Huang_m_18 = Huang_2020_Male_18,
+         Huang_m_25 = Huang_2020_Male_25,
+         Huang_m_28 = Huang_2020_Male_28)
+  
+
+SNP_e0_corr_matrix <- cor(SNP_data_e0, use = "pairwise.complete.obs", method = "spearman")
+SNP_h_corr_matrix <- cor(SNP_data_h, use = "pairwise.complete.obs", method = "spearman")
+
+
+line_data <-
+  bind_rows(Arya_2010_f,
+            Huang_2020_f_18,
+            Huang_2020_f_25,
+            Huang_2020_f_28,
+            Wilson_2020_f,
+            Durham_2014_f,
+            Patel_2021_f,
+            Arya_2010_m,
+            Huang_2020_m_18,
+            Huang_2020_m_25,
+            Huang_2020_m_28) %>% 
+  dplyr::select(line, Study, Sex, Temperature, e0, h) %>% 
+  pivot_wider(values_from = c(e0, h), names_from = c(Study, Sex, Temperature)) 
+
+line_data_e0 <-
+  line_data %>% 
+  dplyr::select(contains("e0")) %>% 
+  rename(Arya_f_25 = e0_Arya_2010_Female_25,
+         Huang_f_18 = e0_Huang_2020_Female_18,
+         Huang_f_25 =  e0_Huang_2020_Female_25,
+         Huang_f_28 = e0_Huang_2020_Female_28,
+         Wilson_f_25 = e0_Wilson_2020_Female_25,
+         Durham_f_25 = e0_Durham_2014_Female_25,
+         Patel_f_23 = e0_Patel_2021_Female_23,
+         Arya_m_25 = e0_Arya_2010_Male_25,
+         Huang_m_18 = e0_Huang_2020_Male_18,
+         Huang_m_25 = e0_Huang_2020_Male_25,
+         Huang_m_28 = e0_Huang_2020_Male_28)
+
+line_data_h <-
+  line_data %>% 
+  dplyr::select(!contains("e0"), -line) %>% 
+  rename(Arya_f_25 = h_Arya_2010_Female_25,
+         Huang_f_18 = h_Huang_2020_Female_18,
+         Huang_f_25 =  h_Huang_2020_Female_25,
+         Huang_f_28 = h_Huang_2020_Female_28,
+         Wilson_f_25 = h_Wilson_2020_Female_25,
+         Durham_f_25 = h_Durham_2014_Female_25,
+         Patel_f_23 = h_Patel_2021_Female_23,
+         Arya_m_25 = h_Arya_2010_Male_25,
+         Huang_m_18 = h_Huang_2020_Male_18,
+         Huang_m_25 = h_Huang_2020_Male_25,
+         Huang_m_28 = h_Huang_2020_Male_28)
+
+line_e0_corr_matrix <- cor(line_data_e0, use = "pairwise.complete.obs", method = "spearman")
+line_h_corr_matrix <- cor(line_data_h, use = "pairwise.complete.obs", method = "spearman")
+
+```
+
+Let's visualise the genetic correlation between lifespan measures. First for life expectancy:
+
+```{r}
+
+breaksList <- seq(-1, 1, by = 0.02)
+
+#pheatmap(line_e0_corr_matrix, breaks = breaksList, 
+#main = "", legend_labels = c("-1", "-0.5", "0", "0.5", "Genetic correlation\n"),
+#color = colorRampPalette(rev(met.brewer("Benedictus", direction = 1)))(length(breaksList)),
+#legend = TRUE, cutree_rows = 3, cutree_cols = 3, angle_col = 45, border_color = "white")
+
+pheatmap(SNP_e0_corr_matrix, breaks = breaksList, 
+main = "", legend_labels = c("-1", "-0.5", "0", "0.5", "Genetic correlation\n"),
+color = colorRampPalette(rev(met.brewer("Benedictus", direction = 1)))(length(breaksList)),
+legend = TRUE, cutree_rows = 3, cutree_cols = 3, angle_col = 45, border_color = "white")
+```
+
+Now for lifespan equality
+
+```{r}
+#pheatmap(all_h_corr_matrix, breaks = breaksList, 
+#main = "", legend_labels = c("-1", "-0.5", "0", "0.5", "Genetic correlation\n"),
+#color = colorRampPalette(rev(met.brewer("Benedictus", direction = 1)))(length(breaksList)),
+#legend = TRUE, cutree_rows = 3, cutree_cols = 3, angle_col = 45, border_color = "white")
+
+pheatmap(SNP_h_corr_matrix, breaks = breaksList, 
+main = "", legend_labels = c("-1", "-0.5", "0", "0.5", "Genetic correlation\n"),
+color = colorRampPalette(rev(met.brewer("Benedictus", direction = 1)))(length(breaksList)),
+legend = TRUE, cutree_rows = 3, cutree_cols = 3, angle_col = 45, border_color = "white")
+```
+
+## Calculate meta-analytic test statistics
+
+### e0, sexes combined
+
+The purpose of this meta-analysis is to search for SNPs that have some effect on ageing, expressed in many different contexts (sexes, temperatures and mating status'). 
+
+To conduct CPASSOC for a given SNP, we need a summary statistic from each GWAS. A different number of lines were included in each GWAS, which can cause small differences in the number of SNPs assessed. We therefore prune the list of SNPs to those included in all univariate analyses. After pruning (and previous pruning to remove SNPs in linkage disequilibrium), 220,582 SNPs remain.
+
+```{r}
+
+Arya_f_l_T <- Arya_f_l_GWAS %>% 
+  dplyr::select(SNP, T) %>% 
+  rename(Arya_f = T)
+  
+Huang_f_18_l_T <- Huang_f_18_l_GWAS %>% 
+  dplyr::select(SNP, T) %>% 
+  rename(Huang_f_18 = T)
+
+Huang_f_25_l_T <- Huang_f_25_l_GWAS %>% 
+  dplyr::select(SNP, T) %>% 
+  rename(Huang_f_25 = T)
+
+Huang_f_28_l_T <- Huang_f_28_l_GWAS %>% 
+  dplyr::select(SNP, T) %>% 
+  rename(Huang_f_28 = T)
+
+Wilson_f_l_T <- Wilson_f_l_GWAS %>% 
+  dplyr::select(SNP, T) %>%  
+  rename(Wilson_f_25  = T)
+
+Durham_f_l_T <- Durham_f_l_GWAS %>% 
+  dplyr::select(SNP, T) %>%  
+  rename(Durham_f_25 = T)
+
+Patel_f_l_T <- Patel_f_l_GWAS %>% 
+  dplyr::select(SNP, T) %>%  
+  rename(Patel_f_23 = T)
+
+Arya_m_l_T <- Arya_m_l_GWAS %>% 
+  dplyr::select(SNP, T) %>% 
+  rename(Arya_m = T)
+
+Huang_m_18_l_T <- Huang_m_18_l_GWAS %>% 
+  dplyr::select(SNP, T) %>% 
+  rename(Huang_m_18  = T)
+
+Huang_m_25_l_T <- Huang_m_25_l_GWAS %>% 
+  dplyr::select(SNP, T) %>% 
+  rename(Huang_m_25 = T)
+
+Huang_m_28_l_T <- Huang_m_28_l_GWAS %>% 
+  dplyr::select(SNP, T) %>% 
+  rename(Huang_m_28  = T)
+
+
+
+all_e0_effect_sizes <-
+  Arya_f_l_T %>%
+  inner_join(Huang_f_18_l_T, by = "SNP") %>%
+  inner_join(Huang_f_25_l_T, by = "SNP") %>%
+  inner_join(Huang_f_28_l_T, by = "SNP") %>% 
+  inner_join(Wilson_f_l_T, by = "SNP") %>% 
+  inner_join(Durham_f_l_T, by = "SNP") %>% 
+  inner_join(Patel_f_l_T, by = "SNP") %>% 
+  inner_join(Arya_m_l_T, by = "SNP") %>% 
+  inner_join(Huang_m_18_l_T, by = "SNP") %>% 
+  inner_join(Huang_m_25_l_T, by = "SNP") %>%
+  inner_join(Huang_m_28_l_T, by = "SNP")
+
+
+all_e0_effect_sizes_values <-
+  all_e0_effect_sizes %>% 
+  dplyr::select(2:12)
+
+Sample_size_all <- c(165, 183, 186, 177, 161, 189, 193, 165, 183, 186, 177) 
+
+if(!file.exists("data/Derived/GWAS_results/all_e0_meta_results.csv")) {
+
+# run the homogeneous effect meta-analysis
+
+S_hom <- SHom(all_e0_effect_sizes_values, Sample_size_all, SNP_e0_corr_matrix)
+
+# calculate meta-p-values and bind the two together with the SNP names
+
+p_S_hom <- pchisq(S_hom, df = 1, ncp = 0, lower.tail = F) %>% 
+  as_tibble() %>% 
+  bind_cols(S_hom) %>% 
+  rename(meta_p_hom = value, 
+         S_hom = ...2)
+
+# Calculate S_het, an extension of S_hom that improves power when the genetic effect sizes vary for different traits (e.g. if a SNP has a sex or enviornment opposite effect on lifespan)
+
+# estimate parameters of gamma distribution
+
+para <- EstimateGamma(N = 1E4, Sample_size_all, SNP_e0_corr_matrix);
+
+S_het <- SHet(all_e0_effect_sizes_values, Sample_size_all, SNP_e0_corr_matrix)
+
+# obtain P-values of S_Het using the estimated gamma parameters
+  
+p_S_het <- pgamma(q = S_het-para[3], shape = para[1], scale = para[2], lower.tail = F) %>% 
+  as_tibble() %>% 
+  bind_cols(S_het) %>% 
+  rename(meta_p_het = value, 
+         S_het = ...2)
+
+
+all_e0_meta_results <- 
+  all_e0_effect_sizes %>% 
+  bind_cols(p_S_hom,
+            p_S_het) # add the unadjusted p values
+
+write_csv(all_e0_meta_results, "data/Derived/GWAS_results/all_e0_meta_results.csv")
+
+} else all_e0_meta_results <- read_csv("data/Derived/GWAS_results/all_e0_meta_results.csv")
+
+```
+
+### H sexes combined
+
+```{r}
+
+Arya_f_h_T <- Arya_f_h_GWAS %>% 
+  dplyr::select(SNP, T) %>% 
+  rename(Arya_f = T)
+  
+Huang_f_18_h_T <- Huang_f_18_h_GWAS %>% 
+  dplyr::select(SNP, T) %>% 
+  rename(Huang_f_18 = T)
+
+Huang_f_25_h_T <- Huang_f_25_h_GWAS %>% 
+  dplyr::select(SNP, T) %>% 
+  rename(Huang_f_25 = T)
+
+Huang_f_28_h_T <- Huang_f_28_h_GWAS %>% 
+  dplyr::select(SNP, T) %>% 
+  rename(Huang_f_28 = T)
+
+Wilson_f_h_T <- Wilson_f_h_GWAS %>% 
+  dplyr::select(SNP, T) %>%  
+  rename(Wilson_f_25  = T)
+
+Durham_f_h_T <- Durham_f_h_GWAS %>% 
+  dplyr::select(SNP, T) %>%  
+  rename(Durham_f_25 = T)
+
+Patel_f_h_T <- Patel_f_h_GWAS %>% 
+  dplyr::select(SNP, T) %>%  
+  rename(Patel_f_23 = T)
+
+Arya_m_h_T <- Arya_m_h_GWAS %>% 
+  dplyr::select(SNP, T) %>% 
+  rename(Arya_m = T)
+
+Huang_m_18_h_T <- Huang_m_18_h_GWAS %>% 
+  dplyr::select(SNP, T) %>% 
+  rename(Huang_m_18  = T)
+
+Huang_m_25_h_T <- Huang_m_25_h_GWAS %>% 
+  dplyr::select(SNP, T) %>% 
+  rename(Huang_m_25 = T)
+
+Huang_m_28_h_T <- Huang_m_28_h_GWAS %>% 
+  dplyr::select(SNP, T) %>% 
+  rename(Huang_m_28  = T)
+
+
+all_h_effect_sizes <-
+  Arya_f_h_T %>%
+  inner_join(Huang_f_18_h_T, by = "SNP") %>%
+  inner_join(Huang_f_25_h_T, by = "SNP") %>%
+  inner_join(Huang_f_28_h_T, by = "SNP") %>% 
+  inner_join(Wilson_f_h_T, by = "SNP") %>% 
+  inner_join(Durham_f_h_T, by = "SNP") %>% 
+  inner_join(Patel_f_h_T, by = "SNP") %>% 
+  inner_join(Arya_m_h_T, by = "SNP") %>% 
+  inner_join(Huang_m_18_h_T, by = "SNP") %>% 
+  inner_join(Huang_m_25_h_T, by = "SNP") %>%
+  inner_join(Huang_m_28_h_T, by = "SNP") 
+  
+
+all_h_effect_sizes_values <-
+  all_h_effect_sizes %>% 
+  dplyr::select(2:12)
+
+if(!file.exists("data/Derived/GWAS_results/all_h_meta_results.csv")) {
+
+S_hom <- SHom(all_h_effect_sizes_values, Sample_size_all, SNP_h_corr_matrix)
+
+# calculate meta-p-values and bind the two together with the SNP names
+
+p_S_hom <- pchisq(S_hom, df = 1, ncp = 0, lower.tail = F) %>% 
+  as_tibble() %>% 
+  bind_cols(S_hom) %>% 
+  rename(meta_p_hom = value, 
+         S_hom = ...2)
+
+# Calculate S_het, an extension of S_hom that improves power when the genetic effect sizes vary for different traits (probably not such a problem here given all traits we investigate are some version of life expectancy)
+
+# estimate parameters of gamma distribution
+
+para <- EstimateGamma(N = 1E4, Sample_size_all, SNP_h_corr_matrix);
+
+S_het <- SHet(all_h_effect_sizes_values, Sample_size_all, SNP_h_corr_matrix)
+
+# obtain P-values of S_Het using the estimated gamma parameters
+  
+p_S_het <- pgamma(q = S_het-para[3], shape = para[1], scale = para[2], lower.tail = F) %>% 
+  as_tibble() %>% 
+  bind_cols(S_het) %>% 
+  rename(meta_p_het = value, 
+         S_het = ...2)
+
+
+all_h_meta_results <- 
+  all_h_effect_sizes %>% 
+  bind_cols(p_S_hom,
+            p_S_het) # add the unadjusted p values
+
+write_csv(all_h_meta_results, "data/Derived/GWAS_results/all_h_meta_results.csv")
+} else all_h_meta_results <- read_csv("data/Derived/GWAS_results/all_h_meta_results.csv")
+
+```
+
+## Plot the results
+
+We combine GWAS summary statistics calculated from lifespan data measured across different contexts. It's possible that some SNPs have G x E interactions that would lead to a heterogeneous effect across phenotypes. We therefore utilise the `S_het` calculated p-values.
+
+First lets show the effect of CPASSOC on the number of variants found to be associated with life expectancy and lifespan equality.
+
+```{r}
+tibble(Analysis = c("CPASSOC", "Univariate", "CPASSOC", "Univariate"),
+       Trait = c("Life expectancy", "Life expectancy", "Lifespan equality", "Lifespan equality"),
+       `p < 0.05e-05 variants` = c(sum(all_e0_meta_results$meta_p_het < 0.00005),
+                                   p_05_SNPs,
+                                   sum(all_h_meta_results$meta_p_het < 0.00005),
+                                   p_05_SNPs_h),
+       `p < 0.05e-08 variants` = c(sum(all_e0_meta_results$meta_p_het < 0.00000005),
+                                   sum(e0_table$`p < 0.05e-08 variants`),
+                                   sum(all_h_meta_results$meta_p_het < 0.00000005),
+                                   sum(h_table$`p < 0.05e-08 variants`)))  %>% 
+  kable() %>% 
+  kable_styling()
+  
+```
+
+Now lets build some 'Manhattan plots' to show where these significant associations can be found:
+
+```{r, fig.width=11}
+
+common_SNPs <- 
+  all_e0_meta_results %>% filter(meta_p_het < 0.00000005) %>% 
+  inner_join(all_h_meta_results %>% filter(meta_p_het < 0.00000005), by = "SNP") %>% 
+  mutate(common_SNP = "YES") %>% 
+  dplyr::select(SNP, common_SNP)
+
+e0_results <- 
+  all_e0_meta_results %>% 
+  dplyr::select(SNP, meta_p_hom, meta_p_het) %>% 
+  rename(P = meta_p_het) %>% 
+  left_join(common_SNPs) %>% 
+  mutate(common_SNP = if_else(is.na(common_SNP), "NO", common_SNP))
+  
+
+h_results <- 
+  all_h_meta_results %>% 
+  dplyr::select(SNP, meta_p_hom, meta_p_het) %>% 
+  rename(P = meta_p_het) %>% 
+  left_join(common_SNPs) %>% 
+  mutate(common_SNP = if_else(is.na(common_SNP), "NO", common_SNP))
+
+# plot the results using the manhattan plot custom function we defined earlier
+
+e0_het_plot <- build_manhattan_plot(e0_results) +
+  labs(title = "Life expectancy") +
+  theme(plot.title = element_text(size = 20, hjust = 0.5)) +
+  coord_cartesian(ylim = c(0, 20))
+
+h_het_plot <- build_manhattan_plot(h_results) +
+  labs(title = "Lifespan equality") +
+  theme(plot.title = element_text(size = 20, hjust = 0.5)) +
+  coord_cartesian(ylim = c(0, 20))
+
+
+e0_het_plot + h_het_plot
+```
+
+Plot the univariate effect sizes for each of the SNPs associated with life expectancy / lifespan equality at the genome-wide significance threshold (p < $0.05^{-8}$) after CPASSOC.
+
+**Life expectancy**
+
+```{r, fig.height=12}
+SNP_heatmap_e0 <-
+  all_e0_meta_results %>% filter(meta_p_het < 0.00000005) %>% 
+  arrange(meta_p_het) %>% dplyr::select(1:12) 
+
+row_name <- SNP_heatmap_e0$SNP
+SNP_heatmap_e0 <- SNP_heatmap_e0 %>% dplyr::select(-SNP) %>% as.matrix()
+rownames(SNP_heatmap_e0) <- row_name
+
+breaksList <- seq(-5, 5, by = 0.1)
+
+annotation_SNPs <- 
+  all_e0_meta_results %>% filter(meta_p_het < 0.00000005) %>% dplyr::select(SNP) %>% 
+  mutate(Chromosome = case_when(str_detect(SNP, "2L") ~ "2L",
+                                str_detect(SNP, "2R") ~ "2R",
+                                str_detect(SNP, "3L") ~ "3L",
+                                str_detect(SNP, "3R") ~ "3R",
+                                str_detect(SNP, "X") ~ "X"))
+
+annotation_studies <- 
+  tibble(Study = c("Arya_f",
+                   "Huang_f_18",
+                   "Huang_f_25",
+                   "Huang_f_28",
+                   "Wilson_f_25",
+                   "Durham_f_25",
+                   "Patel_f_23",
+                   "Arya_m",
+                   "Huang_m_18",
+                   "Huang_m_25",
+                   "Huang_m_28"),
+         Temperature = c("25",
+                         "18",
+                         "25",
+                         "28",
+                         "25",
+                         "25",
+                         "23",
+                         "25",
+                         "18",
+                         "25",
+                         "28")) %>% 
+  mutate(Sex = case_when(str_detect(Study, "_f") ~ "Female",
+                         .default = "Male"),
+         Mating  = case_when(str_detect(Study, "Arya") ~ "NO",
+                             str_detect(Study, "Huang") ~ "Throughout life",
+                             str_detect(Study, "Wilson") ~ "Early life",
+                             str_detect(Study, "Durham") ~ "Throughout life",
+                             str_detect(Study, "Patel") ~ "Early life"),
+         Author = str_extract(Study, ".*(?=\\_)"),
+         Author = str_remove(Author, "_f"),
+         Author = str_remove(Author, "_m"))
+
+
+# create a study annotation column, need this to be a data.frame rather than a tibble for some reason 
+
+Study_details <- annotation_studies %>%
+  as.data.frame() %>% 
+  dplyr::select(Study, Temperature, Mating)
+
+my_categories <- data.frame(row.names = Study_details[, 1], Temperature = Study_details[, 2],
+                            Mating = Study_details[, 3])
+
+my_colors <- list(Temperature = c("18" = "#7bbcd5", # sailboat colours from pnw
+                                  "23" = "#d0e2af",
+                                  "25" = "#f5db99",
+                                  "28" = "#e89c81"),
+                  Mating = c("NO" = "#f8e3d1", # Shuksan from pnw
+                             "Early life" = "#d7b1c5",
+                             "Throughout life" = "#ac8eab"),
+                  Chromosome = c("2L" = "#d8aedd", # lake colours from pnw
+                                 "2R" = "#cb74ad",
+                                 "3L" = "#11c2b5",
+                                 "3R" = "#72e1e1",
+                                 "X" = "#fbcc74"))
+# create a SNP annotation column
+
+SNP_details <- annotation_SNPs %>%
+  as.data.frame()
+
+my_SNP_categories <- data.frame(row.names = SNP_details[, 1], Chromosome = SNP_details[, 2])
+
+my_col_names <- c("Arya et al females", "Huang et al females", "Huang et al females",
+                  "Huang et al females", "Wilson et al females", "Durham et al females",
+                  "Patel et al females", "Arya et al males", "Huang et al males", "Huang et al males",
+                  "Huang et al males")
+
+
+pheatmap(SNP_heatmap_e0, breaks = breaksList, 
+         main = "", legend_labels = c("-1", "-0.5", "0", "0.5", "Genetic correlation\n"),
+         color = colorRampPalette(rev(met.brewer("Benedictus", direction = 1)))(length(breaksList)),
+         legend = TRUE, cutree_rows = 4, cutree_cols = 3, 
+         angle_col = 45, border_color = "white",
+         annotation_col = my_categories, annotation_colors = my_colors, annotation_row = my_SNP_categories,
+         fontsize = 8, labels_col = my_col_names)
+
+```
+
+**Lifespan inequality**
+
+```{r}
+SNP_heatmap_h <-
+  all_h_meta_results %>% filter(meta_p_het < 0.00000005) %>% 
+  arrange(meta_p_het) %>% dplyr::select(1:12) 
+
+row_name <- SNP_heatmap_h$SNP
+SNP_heatmap_h <- SNP_heatmap_h %>% dplyr::select(-SNP) %>% as.matrix()
+rownames(SNP_heatmap_h) = row_name
+
+breaksList <- seq(-5, 5, by = 0.1)
+
+annotation_SNPs_h <- 
+  all_h_meta_results %>% filter(meta_p_het < 0.00000005) %>% dplyr::select(SNP) %>% 
+  mutate(Chromosome = case_when(str_detect(SNP, "2L") ~ "2L",
+                                str_detect(SNP, "2R") ~ "2R",
+                                str_detect(SNP, "3L") ~ "3L",
+                                str_detect(SNP, "3R") ~ "3R",
+                                str_detect(SNP, "X") ~ "X"))
+
+
+# create a SNP annotation column
+
+SNP_details_h <- annotation_SNPs_h %>%
+  as.data.frame()
+
+my_SNP_categories_h <- data.frame(row.names = SNP_details_h[, 1], Chromosome = SNP_details_h[, 2])
+
+pheatmap(SNP_heatmap_h, breaks = breaksList, 
+         main = "", legend_labels = c("-1", "-0.5", "0", "0.5", "Genetic correlation\n"),
+         color = colorRampPalette(rev(met.brewer("Benedictus", direction = 1)))(length(breaksList)),
+         legend = TRUE, cutree_rows = 3, cutree_cols = 4, angle_col = 45, border_color = "white",
+         annotation_col = my_categories, annotation_colors = my_colors, 
+         annotation_row = my_SNP_categories_h,
+         fontsize = 8, labels_col = my_col_names)
+
+```
+
+# Analysis of sexually antagonistic effects on ageing
+
+## The intersex genetic correlation
+
+Lets take a quick look at the intersex-genetic correlations for our metrics in each relevant measurement condition.
+
+```{r}
+Arya_two_sexes_SNPS <-
+  left_join(
+    Arya_f_l_GWAS %>% 
+      dplyr::select(1:2) %>% 
+      rename(Female_e0_effect = BETA), 
+    
+    Arya_m_l_GWAS %>% 
+      dplyr::select(1:2) %>% 
+      rename(Male_e0_effect = BETA)
+  ) %>% 
+  left_join(Arya_f_h_GWAS %>% 
+              dplyr::select(1:2) %>% 
+              rename(Female_h_effect = BETA)) %>% 
+  left_join(Arya_m_h_GWAS %>% 
+              dplyr::select(1:2) %>% 
+              rename(Male_h_effect = BETA))
+
+Huang_18_two_sexes_SNPS <-
+  left_join(
+    Huang_f_18_l_GWAS %>% 
+      dplyr::select(1:2) %>% 
+      rename(Female_e0_effect = BETA), 
+    
+    Huang_m_18_l_GWAS %>% 
+      dplyr::select(1:2) %>% 
+      rename(Male_e0_effect = BETA)
+  ) %>% 
+  left_join(Huang_f_18_h_GWAS %>% 
+              dplyr::select(1:2) %>% 
+              rename(Female_h_effect = BETA)) %>% 
+  left_join(Huang_m_18_h_GWAS %>% 
+              dplyr::select(1:2) %>% 
+              rename(Male_h_effect = BETA))
+
+
+Huang_25_two_sexes_SNPS <-
+  left_join(
+    Huang_f_25_l_GWAS %>% 
+      dplyr::select(1:2) %>% 
+      rename(Female_e0_effect = BETA), 
+    
+    Huang_m_25_l_GWAS %>% 
+      dplyr::select(1:2) %>% 
+      rename(Male_e0_effect = BETA)
+  ) %>% 
+  left_join(Huang_f_25_h_GWAS %>% 
+              dplyr::select(1:2) %>% 
+              rename(Female_h_effect = BETA)) %>% 
+  left_join(Huang_m_25_h_GWAS %>% 
+              dplyr::select(1:2) %>% 
+              rename(Male_h_effect = BETA))  
+
+
+Huang_28_two_sexes_SNPS <-
+  left_join(
+    Huang_f_28_l_GWAS %>% 
+      dplyr::select(1:2) %>% 
+      rename(Female_e0_effect = BETA), 
+    
+    Huang_m_28_l_GWAS %>% 
+      dplyr::select(1:2) %>% 
+      rename(Male_e0_effect = BETA)
+  ) %>% 
+  left_join(Huang_f_28_h_GWAS %>% 
+              dplyr::select(1:2) %>% 
+              rename(Female_h_effect = BETA)) %>% 
+  left_join(Huang_m_28_h_GWAS %>% 
+              dplyr::select(1:2) %>% 
+              rename(Male_h_effect = BETA))
+```
+
+Plot the within-treatment intersex-genetic correlations
+
+```{r, fig.height=10}
+pal <- pnw_palette("Shuksan2", 100)
+
+Arya_e0_sex_plot <-
+  Arya_two_sexes_SNPS %>% 
+  ggplot(aes(x = Female_e0_effect, y = Male_e0_effect )) +
+  geom_vline(xintercept = 0, linetype = 2, linewidth = 1) +
+  geom_hline(yintercept = 0, linetype = 2, linewidth = 1) +
+  stat_binhex(bins = 50) +
+  scale_fill_gradientn(colours = pal) +
+  #geom_point() +
+  #stat_smooth(method = "lm", formula = y ~ x + I(x^2), linewidth = 0.75, colour = "black") +
+  coord_cartesian(xlim = c(-0.8, 0.8), ylim = c(-0.8, 0.8)) +
+  labs(x = "Effect on female life expectancy", 
+       y = "Effect on male\nlife expectancy",
+       title = "Arya et al 2010: 25C") +
+  theme_bw() +
+  theme(legend.position = "none",
+        text = element_text(size = 10),
+        plot.title = element_text(hjust = 0.5, size = 11))
+
+Arya_h_sex_plot <-
+  Arya_two_sexes_SNPS %>% 
+  ggplot(aes(x = Female_h_effect, y = Male_h_effect )) +
+  geom_vline(xintercept = 0, linetype = 2, linewidth = 1) +
+  geom_hline(yintercept = 0, linetype = 2, linewidth = 1) +
+  stat_binhex(bins = 50) +
+  scale_fill_gradientn(colours = pal) +
+  #geom_point() +
+  #stat_smooth(method = "lm", formula = y ~ x + I(x^2), linewidth = 0.75, colour = "black") +
+  coord_cartesian(xlim = c(-0.8, 0.8), ylim = c(-0.8, 0.8)) +
+  labs(x = "Effect on female lifespan equality", 
+       y = "Effect on male\nlifespan equality",
+       title = "Arya et al 2010: 25C") +
+  theme_bw() +
+  theme(legend.position = "none",
+        text = element_text(size = 10),
+        plot.title = element_text(hjust = 0.5, size = 11))
+
+Huang_18_e0_sex_plot <-
+  Huang_18_two_sexes_SNPS %>% 
+  ggplot(aes(x = Female_e0_effect, y = Male_e0_effect )) +
+  geom_vline(xintercept = 0, linetype = 2, linewidth = 1) +
+  geom_hline(yintercept = 0, linetype = 2, linewidth = 1) +
+  stat_binhex(bins = 50) +
+  scale_fill_gradientn(colours = pal) +
+  #geom_point() +
+  #stat_smooth(method = "lm", formula = y ~ x + I(x^2), linewidth = 0.75, colour = "black") +
+  coord_cartesian(xlim = c(-0.8, 0.8), ylim = c(-0.8, 0.8)) +
+  labs(x = "Effect on female life expectancy", 
+       y = "Effect on male\nlife expectancy",
+       title = "Huang et al, 2020: 18C") +
+  theme_bw() +
+  theme(legend.position = "none",
+        text = element_text(size = 10),
+        plot.title = element_text(hjust = 0.5, size = 11))
+
+Huang_18_h_sex_plot <-
+  Huang_18_two_sexes_SNPS %>% 
+  ggplot(aes(x = Female_h_effect, y = Male_h_effect )) +
+  geom_vline(xintercept = 0, linetype = 2, linewidth = 1) +
+  geom_hline(yintercept = 0, linetype = 2, linewidth = 1) +
+  stat_binhex(bins = 50) +
+  scale_fill_gradientn(colours = pal) +
+  #geom_point() +
+  #stat_smooth(method = "lm", formula = y ~ x + I(x^2), linewidth = 0.75, colour = "black") +
+  coord_cartesian(xlim = c(-0.8, 0.8), ylim = c(-0.8, 0.8)) +
+  labs(x = "Effect on female lifespan equality", 
+       y = "Effect on male\nlifespan equality",
+       title = "Huang et al, 2020: 18C") +
+  theme_bw() +
+  theme(legend.position = "none",
+        text = element_text(size = 10),
+        plot.title = element_text(hjust = 0.5, size = 11))
+
+Huang_25_e0_sex_plot <-
+  Huang_25_two_sexes_SNPS %>% 
+  ggplot(aes(x = Female_e0_effect, y = Male_e0_effect )) +
+  geom_vline(xintercept = 0, linetype = 2, linewidth = 1) +
+  geom_hline(yintercept = 0, linetype = 2, linewidth = 1) +
+  stat_binhex(bins = 50) +
+  scale_fill_gradientn(colours = pal) +
+  #geom_point() +
+  #stat_smooth(method = "lm", formula = y ~ x + I(x^2), linewidth = 0.75, colour = "black") +
+  coord_cartesian(xlim = c(-0.8, 0.8), ylim = c(-0.8, 0.8)) +
+  labs(x = "Effect on female life expectancy", 
+       y = "Effect on male\nlife expectancy",
+       title = "Huang et al, 2020: 25C") +
+  theme_bw() +
+  theme(legend.position = "none",
+        text = element_text(size = 10),
+        plot.title = element_text(hjust = 0.5, size = 11))
+
+Huang_25_h_sex_plot <-
+  Huang_25_two_sexes_SNPS %>% 
+  ggplot(aes(x = Female_h_effect, y = Male_h_effect )) +
+  geom_vline(xintercept = 0, linetype = 2, linewidth = 1) +
+  geom_hline(yintercept = 0, linetype = 2, linewidth = 1) +
+  stat_binhex(bins = 50) +
+  scale_fill_gradientn(colours = pal) +
+  #geom_point() +
+  #stat_smooth(method = "lm", formula = y ~ x + I(x^2), linewidth = 0.75, colour = "black") +
+  coord_cartesian(xlim = c(-0.8, 0.8), ylim = c(-0.8, 0.8)) +
+  labs(x = "Effect on female lifespan equality", 
+       y = "Effect on male\nlifespan equality",
+       title = "Huang et al, 2020: 25C") +
+  theme_bw() +
+  theme(legend.position = "none",
+        text = element_text(size = 10),
+        plot.title = element_text(hjust = 0.5, size = 11))
+
+Huang_28_e0_sex_plot <-
+  Huang_28_two_sexes_SNPS %>% 
+  ggplot(aes(x = Female_e0_effect, y = Male_e0_effect )) +
+  geom_vline(xintercept = 0, linetype = 2, linewidth = 1) +
+  geom_hline(yintercept = 0, linetype = 2, linewidth = 1) +
+  stat_binhex(bins = 50) +
+  scale_fill_gradientn(colours = pal) +
+  #geom_point() +
+  #stat_smooth(method = "lm", formula = y ~ x + I(x^2), linewidth = 0.75, colour = "black") +
+  coord_cartesian(xlim = c(-0.8, 0.8), ylim = c(-0.8, 0.8)) +
+  labs(x = "Effect on female life expectancy", 
+       y = "Effect on male\nlife expectancy",
+       title = "Huang et al, 2020: 28C") +
+  theme_bw() +
+  theme(legend.position = "none",
+        text = element_text(size = 10),
+        plot.title = element_text(hjust = 0.5, size = 11))
+
+Huang_28_h_sex_plot <-
+  Huang_28_two_sexes_SNPS %>% 
+  ggplot(aes(x = Female_h_effect, y = Male_h_effect )) +
+  geom_vline(xintercept = 0, linetype = 2, linewidth = 1) +
+  geom_hline(yintercept = 0, linetype = 2, linewidth = 1) +
+  stat_binhex(bins = 50) +
+  scale_fill_gradientn(colours = pal) +
+  #geom_point() +
+  #stat_smooth(method = "lm", formula = y ~ x + I(x^2), linewidth = 0.75, colour = "black") +
+  coord_cartesian(xlim = c(-0.8, 0.8), ylim = c(-0.8, 0.8)) +
+  labs(x = "Effect on female lifespan equality", 
+       y = "Effect on male\nlifespan equality",
+       title = "Huang et al, 2020: 28C") +
+  theme_bw() +
+  theme(legend.position = "none",
+        text = element_text(size = 10),
+        plot.title = element_text(hjust = 0.5, size = 11))
+
+(Arya_e0_sex_plot + Arya_h_sex_plot) /
+  (Huang_18_e0_sex_plot + Huang_18_h_sex_plot) / 
+  (Huang_25_e0_sex_plot + Huang_25_h_sex_plot) / 
+  (Huang_28_e0_sex_plot + Huang_28_h_sex_plot) 
+```
+
+
+## The axis of sexual antagonism
+
+While there is a strong inter-sex genetic correlation for both life expectancy and lifespan equality, both correlations are significantly lower than one. Thus, it is likely that there are alleles that have sex-limited or sex-opposite effects on lifespan/lifespan equality. In an attempt to identify the latter, we return to the individual study data, select those studies that measured lifespan in both sexes and calculate a sexual antagonism index for each line, following previous studies focused on similar questions (e.g. [Berger et al, 2014](), [Grieshop and Arnqvist, 2018](), [Ruzicka et al, 2020]()). To create the index, we rotate the coordinate system of the female and male fitness plane by 45 degrees, by multiplying the 204 x 2 fitness matrix by the rotation matrix
+
+$$\mathbf{R} = \begin{bmatrix}
+       \frac{-1}{\sqrt{2}} & \frac{-1}{\sqrt{2}} \\[0.3em]
+       \frac{-1}{\sqrt{2}} & \frac{1}{\sqrt{2}}  \\[0.3em]
+     \end{bmatrix}$$
+
+```{r}
+
+rotation_matrix <- 
+  matrix(c(-1/sqrt(2), -1/sqrt(2), -1/sqrt(2), 1/sqrt(2)),
+         nrow = 2)
+
+rotate_axis_function <- function(data_1, data_2, Females, Males, metric){
+  left_join(
+    data_1 %>% rename(Females = metric),
+    data_2 %>% rename(Males = metric)) %>% 
+    dplyr::select(-line) %>% 
+    as.matrix() %*% rotation_matrix %>% 
+    as_tibble() %>% 
+    rename(SC_axis  = V1,
+           SA_axis = V2) %>% 
+    bind_cols(left_join(
+      data_1 %>% rename(Females = metric),
+      data_2%>% rename(Males = metric))) %>% 
+    dplyr::select(line, Females, Males, everything())
+}
+  
+Arya_l_SA <-
+  rotate_axis_function(Arya_f_l, Arya_m_l, 
+                     Females = "Female_life_expectancy", 
+                     Males = "Male_life_expectancy",
+                     metric = "e0") 
+
+Huang_18_l_SA <-
+  rotate_axis_function(Huang_f_18_l, Huang_m_18_l, 
+                     Females = "Female_life_expectancy", 
+                     Males = "Male_life_expectancy",
+                     metric = "e0") 
+
+Huang_25_l_SA <-
+  rotate_axis_function(Huang_f_25_l, Huang_m_25_l, 
+                     Females = "Female_life_expectancy", 
+                     Males = "Male_life_expectancy",
+                     metric = "e0") 
+
+Huang_28_l_SA <-
+  rotate_axis_function(Huang_f_28_l, Huang_m_28_l, 
+                     Females = "Female_life_expectancy", 
+                     Males = "Male_life_expectancy",
+                     metric = "e0") 
+
+# now lifespan equality
+
+Arya_h_SA <-
+  rotate_axis_function(Arya_f_h, Arya_m_h, 
+                     Females = "Female_lifespan_equality", 
+                     Males = "Male_lifespan_equality",
+                     metric = "h") 
+
+Huang_18_h_SA <-
+  rotate_axis_function(Huang_f_18_h, Huang_m_18_h, 
+                     Females = "Female_lifespan_equality", 
+                     Males = "Male_lifespan_equality",
+                     metric = "h") 
+
+Huang_25_h_SA <-
+  rotate_axis_function(Huang_f_25_h, Huang_m_25_h, 
+                     Females = "Female_lifespan_equality", 
+                     Males = "Male_lifespan_equality",
+                     metric = "h") 
+
+Huang_28_h_SA <-
+  rotate_axis_function(Huang_f_28_h, Huang_m_28_h, 
+                     Females = "Female_lifespan_equality", 
+                     Males = "Male_lifespan_equality",
+                     metric = "h") 
+
+```
+
+To visualise this transformation lets plot the standardised life expectancy means presented in Arya _et al_ 2010
+
+```{r}
+
+
+Arya_l_SA %>% 
+  ggplot(aes(x = Females, y = Males)) +
+  geom_vline(xintercept = 0, linetype = 2, linewidth = 1) +
+  geom_hline(yintercept = 0, linetype = 2, linewidth = 1) +
+  geom_abline(intercept = 0, slope = -1, linewidth = 1, linetype = 2, colour = "salmon") +
+  geom_abline(intercept = 0, slope = 1, linewidth = 1, linetype = 2, colour = "salmon") +
+  geom_hline(yintercept = 0, linetype = 2, linewidth = 1) +
+  geom_point(aes(fill = SA_axis), shape = 21, size = 4) +
+  scale_fill_moma_c("Avedon", direction = -1, limits = c(-2.5, 2.5)) +
+  coord_cartesian(xlim = c(-4, 4), ylim = c(-4, 4)) +
+  labs(fill = "SA index",
+       x = "Life expectancy (female)",
+       y = "Life expectancy (male)",
+       title = "Arya et al 2010 data") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+Fig XX. Residual line means for female and male life expectancy. Points indicate a single genetic line. The sexual antagonism index ranges from male-beneficial and female-detrimental (orange points) to female-beneficial and male-detrimental (green points). The red dotted lines show the rotation that has been performed to create the antagonism and concordance axis. 
+
+**I don't actually agree that this axis truly represents antagonism. It finds perpendicular departures from the perfect regression, which I guess probably are in part caused by SNPs with sex-opposite effects, but they don't have to be!**
+
+## Run univariate GWAS
+
+```{r}
+SA_e0_Arya <- prep_for_SA_GWAS(Arya_l_SA)
+SA_e0_Huang_18 <- prep_for_SA_GWAS(Huang_18_l_SA)
+SA_e0_Huang_25 <- prep_for_SA_GWAS(Huang_25_l_SA)
+SA_e0_Huang_28 <- prep_for_SA_GWAS(Huang_28_l_SA)
+
+SA_h_Arya <- prep_for_SA_GWAS(Arya_h_SA)
+SA_h_Huang_18 <- prep_for_SA_GWAS(Huang_18_h_SA)
+SA_h_Huang_25 <- prep_for_SA_GWAS(Huang_25_h_SA)
+SA_h_Huang_28 <- prep_for_SA_GWAS(Huang_28_h_SA)
+
+
+
+if(!file.exists("data/Derived/GWAS_results/SA_e0_Arya.tsv.gz")) {
+run_GWAS(SA_e0_Arya)
+run_GWAS(SA_e0_Huang_18)
+run_GWAS(SA_e0_Huang_25)
+run_GWAS(SA_e0_Huang_28)
+run_GWAS(SA_h_Arya)
+run_GWAS(SA_h_Huang_18)
+run_GWAS(SA_h_Huang_25)
+run_GWAS(SA_h_Huang_28)
+}
+
+SA_e0_Arya_GWAS <- read_tsv("data/Derived/GWAS_results/SA_e0_Arya.tsv.gz") 
+SA_e0_Huang_18_GWAS <- read_tsv("data/Derived/GWAS_results/SA_e0_Huang_18.tsv.gz") 
+SA_e0_Huang_25_GWAS <- read_tsv("data/Derived/GWAS_results/SA_e0_Huang_25.tsv.gz") 
+SA_e0_Huang_28_GWAS <- read_tsv("data/Derived/GWAS_results/SA_e0_Huang_28.tsv.gz") 
+
+SA_h_Arya_GWAS <- read_tsv("data/Derived/GWAS_results/SA_h_Arya.tsv.gz") 
+SA_h_Huang_18_GWAS <- read_tsv("data/Derived/GWAS_results/SA_h_Huang_18.tsv.gz")
+SA_h_Huang_25_GWAS <- read_tsv("data/Derived/GWAS_results/SA_h_Huang_25.tsv.gz")
+SA_h_Huang_28_GWAS <- read_tsv("data/Derived/GWAS_results/SA_h_Huang_28.tsv.gz")
+
+```
+
+How many variants do we find that have notable associations with the SA axis for life expectancy:
+
+```{r}
+# filter down tp sig associations
+
+SA_e0_table <-
+bind_rows(
+SA_e0_Arya_GWAS %>% 
+  filter(P < 0.00005) %>% 
+  transmute(`p < 0.05e-05 variants` = n(),
+         `p < 0.05e-08 variants` = nrow(filter(SA_e0_Arya_GWAS, P < 0.00000005))) %>%
+  distinct() %>% 
+  mutate(Study = "Arya et al 2010",
+         Temperature = "25",
+         `Mating status` = "Virgin") %>% 
+  dplyr::select(Study, Temperature, `Mating status`, `p < 0.05e-05 variants`, `p < 0.05e-08 variants`),
+  
+SA_e0_Huang_18_GWAS %>% 
+  filter(P < 0.00005) %>% 
+  transmute(`p < 0.05e-05 variants` = n(),
+         `p < 0.05e-08 variants` = nrow(filter(SA_e0_Huang_18_GWAS, P < 0.00000005))) %>%
+  distinct() %>% 
+  mutate(Study = "Huang et al 2020",
+         Temperature = "18",
+         `Mating status` = "Mated") %>% 
+  dplyr::select(Study, Temperature, `Mating status`, `p < 0.05e-05 variants`, `p < 0.05e-08 variants`),
+
+SA_e0_Huang_25_GWAS %>% 
+  filter(P < 0.00005) %>% 
+  transmute(`p < 0.05e-05 variants` = n(),
+         `p < 0.05e-08 variants` = nrow(filter(SA_e0_Huang_25_GWAS, P < 0.00000005))) %>%
+  distinct() %>% 
+  mutate(Study = "Huang et al 2020",
+         Temperature = "25",
+         `Mating status` = "Mated") %>% 
+  dplyr::select(Study, Temperature, `Mating status`, `p < 0.05e-05 variants`, `p < 0.05e-08 variants`),
+
+SA_e0_Huang_28_GWAS %>% 
+  filter(P < 0.00005) %>% 
+  transmute(`p < 0.05e-05 variants` = n(),
+         `p < 0.05e-08 variants` = nrow(filter(SA_e0_Huang_28_GWAS, P < 0.00000005))) %>%
+  distinct() %>% 
+  mutate(Study = "Huang et al 2020",
+         Temperature = "28",
+         `Mating status` = "Mated") %>% 
+  dplyr::select(Study, Temperature, `Mating status`, `p < 0.05e-05 variants`, `p < 0.05e-08 variants`)) 
+
+# how many unique variants have been detected?
+
+SA_p_05_SNPs_e0 <-
+  bind_rows(
+    
+    SA_e0_Arya_GWAS %>% 
+      filter(P < 0.00005),
+    
+    SA_e0_Huang_18_GWAS %>% 
+      filter(P < 0.00005),
+  
+    SA_e0_Huang_25_GWAS %>% 
+      filter(P < 0.00005),
+    
+    SA_e0_Huang_28_GWAS %>% 
+      filter(P < 0.00005)) %>% 
+  distinct(SNP) %>% 
+  nrow()
+
+
+SA_e0_table %>% 
+  add_row(Study = "Totals",
+          Temperature = "",
+          `Mating status` = "",
+          `p < 0.05e-05 variants` = SA_p_05_SNPs_e0,
+          `p < 0.05e-08 variants` = sum(SA_e0_table$`p < 0.05e-08 variants`)) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+How many variants do we find that have notable associations with the SA axis for lifespan equality:
+
+```{r}
+# filter down tp sig associations
+
+SA_h_table <-
+bind_rows(
+SA_h_Arya_GWAS %>% 
+  filter(P < 0.00005) %>% 
+  transmute(`p < 0.05e-05 variants` = n(),
+         `p < 0.05e-08 variants` = nrow(filter(SA_h_Arya_GWAS, P < 0.00000005))) %>%
+  distinct() %>% 
+  mutate(Study = "Arya et al 2010",
+         Temperature = "25",
+         `Mating status` = "Virgin") %>% 
+  dplyr::select(Study, Temperature, `Mating status`, `p < 0.05e-05 variants`, `p < 0.05e-08 variants`),
+  
+SA_h_Huang_18_GWAS %>% 
+  filter(P < 0.00005) %>% 
+  transmute(`p < 0.05e-05 variants` = n(),
+         `p < 0.05e-08 variants` = nrow(filter(SA_h_Huang_18_GWAS, P < 0.00000005))) %>%
+  distinct() %>% 
+  mutate(Study = "Huang et al 2020",
+         Temperature = "18",
+         `Mating status` = "Mated") %>% 
+  dplyr::select(Study, Temperature, `Mating status`, `p < 0.05e-05 variants`, `p < 0.05e-08 variants`),
+
+SA_h_Huang_25_GWAS %>% 
+  filter(P < 0.00005) %>% 
+  transmute(`p < 0.05e-05 variants` = n(),
+         `p < 0.05e-08 variants` = nrow(filter(SA_h_Huang_25_GWAS, P < 0.00000005))) %>%
+  distinct() %>% 
+  mutate(Study = "Huang et al 2020",
+         Temperature = "25",
+         `Mating status` = "Mated") %>% 
+  dplyr::select(Study, Temperature, `Mating status`, `p < 0.05e-05 variants`, `p < 0.05e-08 variants`),
+
+SA_h_Huang_28_GWAS %>% 
+  filter(P < 0.00005) %>% 
+  transmute(`p < 0.05e-05 variants` = n(),
+         `p < 0.05e-08 variants` = nrow(filter(SA_h_Huang_28_GWAS, P < 0.00000005))) %>%
+  distinct() %>% 
+  mutate(Study = "Huang et al 2020",
+         Temperature = "28",
+         `Mating status` = "Mated") %>% 
+  dplyr::select(Study, Temperature, `Mating status`, `p < 0.05e-05 variants`, `p < 0.05e-08 variants`)) 
+
+# how many unique variants have been detected?
+
+SA_p_05_SNPs_h <-
+  bind_rows(
+    
+    SA_h_Arya_GWAS %>% 
+      filter(P < 0.00005),
+    
+    SA_h_Huang_18_GWAS %>% 
+      filter(P < 0.00005),
+  
+    SA_h_Huang_25_GWAS %>% 
+      filter(P < 0.00005),
+    
+    SA_h_Huang_28_GWAS %>% 
+      filter(P < 0.00005)) %>% 
+  distinct(SNP) %>% 
+  nrow()
+
+
+SA_h_table %>% 
+  add_row(Study = "Totals",
+          Temperature = "",
+          `Mating status` = "",
+          `p < 0.05e-05 variants` = SA_p_05_SNPs_h,
+          `p < 0.05e-08 variants` = sum(SA_h_table$`p < 0.05e-08 variants`)) %>% 
+  kable() %>% 
+  kable_styling()
+```
+
+## Run CPASSOC
+
+### Generate the genetic correlation matrix
+
+We calculate the genetic correlations between traits using both the line mean and SNP effect size comparisons. We use the SNP correlations following Zhu et al (2015) and show these in the below plots. Note that while the two approaches produce results that have a strong positive correlation, there are small differences that will affect downstream analyses.
+
+```{r}
+# use the BETA coefficients to build the SNP correlation matrix
+
+SNP_SA_data_e0 <-
+  bind_rows(
+    SA_e0_Arya_GWAS %>% 
+      mutate(Study = "Arya", Temperature = 25),
+    SA_e0_Huang_18_GWAS %>% 
+      mutate(Study= "Huang", Temperature= 18),
+    SA_e0_Huang_25_GWAS %>% 
+      mutate(Study= "Huang", Temperature= 25),
+    SA_e0_Huang_28_GWAS %>% 
+      mutate(Study= "Huang", Temperature= 28)) %>% 
+  dplyr::select(SNP, BETA, Study, Temperature) %>% 
+  pivot_wider(values_from = BETA, names_from = c(Study, Temperature)) %>% 
+  dplyr::select(-SNP) 
+
+SNP_SA_data_h <-
+  bind_rows(
+    SA_h_Arya_GWAS %>% 
+      mutate(Study = "Arya", Temperature = 25),
+    SA_h_Huang_18_GWAS %>% 
+      mutate(Study= "Huang", Temperature= 18),
+    SA_h_Huang_25_GWAS %>% 
+      mutate(Study= "Huang", Temperature= 25),
+    SA_h_Huang_28_GWAS %>% 
+      mutate(Study= "Huang", Temperature= 28)) %>% 
+  dplyr::select(SNP, BETA, Study, Temperature) %>% 
+  pivot_wider(values_from = BETA, names_from = c(Study, Temperature)) %>% 
+  dplyr::select(-SNP) 
+  
+
+SNP_SA_e0_corr_matrix <- cor(SNP_SA_data_e0, use = "pairwise.complete.obs", method = "spearman")
+SNP_SA_h_corr_matrix <- cor(SNP_SA_data_h, use = "pairwise.complete.obs", method = "spearman")
+
+SA_e0_line_data <-
+  bind_rows(Arya_l_SA %>% mutate(Study = "Arya_25"),
+            Huang_18_l_SA %>% mutate(Study = "Huang_18"),
+            Huang_25_l_SA %>% mutate(Study = "Huang_25"),
+            Huang_28_l_SA %>% mutate(Study = "Huang_28")) %>% 
+  dplyr::select(line, Study, SA_axis) %>% 
+  pivot_wider(values_from = SA_axis, names_from = Study) %>% 
+  dplyr::select(-line)
+
+SA_h_line_data <-
+  bind_rows(Arya_h_SA %>% mutate(Study = "Arya_25"),
+            Huang_18_h_SA %>% mutate(Study = "Huang_18"),
+            Huang_25_h_SA %>% mutate(Study = "Huang_25"),
+            Huang_28_h_SA %>% mutate(Study = "Huang_28")) %>% 
+  dplyr::select(line, Study, SA_axis) %>% 
+  pivot_wider(values_from = SA_axis, names_from = Study) %>% 
+  dplyr::select(-line)
+
+SA_line_e0_corr_matrix <- cor(SA_e0_line_data, use = "pairwise.complete.obs", method = "spearman")
+SA_line_h_corr_matrix <- cor(SA_h_line_data, use = "pairwise.complete.obs", method = "spearman")
+
+```
+
+### Calculate meta-analytic test statistics
+
+#### SA for e0
+
+The purpose of this meta-analysis is to search for SNPs that have sex-specific effects on ageing. 
+
+To conduct CPASSOC for a given SNP, we need a summary statistic from each GWAS. A different number of lines were included in each GWAS, which can cause small differences in the number of SNPs assessed. We therefore prune the list of SNPs to those included in all univariate analyses. After pruning (and previous pruning to remove SNPs in linkage disequilibrium), 220,582 SNPs remain.
+
+```{r}
+
+SA_Arya_l_T <- SA_e0_Arya_GWAS %>% 
+  dplyr::select(SNP, T) %>% 
+  rename(Arya = T)
+  
+SA_Huang_18_l_T <- SA_e0_Huang_18_GWAS %>% 
+  dplyr::select(SNP, T) %>% 
+  rename(Huang_18 = T)
+
+SA_Huang_25_l_T <- SA_e0_Huang_25_GWAS %>% 
+  dplyr::select(SNP, T) %>% 
+  rename(Huang_25 = T)
+
+SA_Huang_28_l_T <- SA_e0_Huang_28_GWAS %>% 
+  dplyr::select(SNP, T) %>% 
+  rename(Huang_28 = T)
+
+SA_e0_effect_sizes <-
+  SA_Arya_l_T %>%
+  inner_join(SA_Huang_18_l_T, by = "SNP") %>%
+  inner_join(SA_Huang_25_l_T, by = "SNP") %>%
+  inner_join(SA_Huang_28_l_T, by = "SNP") 
+
+
+SA_e0_effect_size_values <-
+  SA_e0_effect_sizes %>% 
+  dplyr::select(2:5)
+
+Sample_size_SA <- c(165, 183, 186, 177) 
+
+if(!file.exists("data/Derived/GWAS_results/SA_e0_meta_results.csv")) {
+
+# run the homogeneous effect meta-analysis
+
+S_hom <- SHom(SA_e0_effect_size_values, Sample_size_SA, SNP_SA_e0_corr_matrix)
+
+# calculate meta-p-values and bind the two together with the SNP names
+
+p_S_hom <- pchisq(S_hom, df = 1, ncp = 0, lower.tail = F) %>% 
+  as_tibble() %>% 
+  bind_cols(S_hom) %>% 
+  rename(meta_p_hom = value, 
+         S_hom = ...2)
+
+# Calculate S_het, an extension of S_hom that improves power when the genetic effect sizes vary for different traits (e.g. if a SNP has a sex or enviornment opposite effect on lifespan)
+
+# estimate parameters of gamma distribution
+
+para <- EstimateGamma(N = 1E4, Sample_size_SA, SNP_SA_e0_corr_matrix);
+
+S_het <- SHet(SA_e0_effect_size_values, Sample_size_SA, SNP_SA_e0_corr_matrix)
+
+# obtain P-values of S_Het using the estimated gamma parameters
+  
+p_S_het <- pgamma(q = S_het-para[3], shape = para[1], scale = para[2], lower.tail = F) %>% 
+  as_tibble() %>% 
+  bind_cols(S_het) %>% 
+  rename(meta_p_het = value, 
+         S_het = ...2)
+
+
+SA_e0_meta_results <- 
+  SA_e0_effect_sizes %>% 
+  bind_cols(p_S_hom,
+            p_S_het) # add the unadjusted p values
+
+write_csv(SA_e0_meta_results, "data/Derived/GWAS_results/SA_e0_meta_results.csv")
+
+} else SA_e0_meta_results <- read_csv("data/Derived/GWAS_results/SA_e0_meta_results.csv")
+
+```
+
+#### SA for lifespan equality
+
+```{r}
+
+# lifespan equality
+
+SA_Arya_h_T <- SA_h_Arya_GWAS %>% 
+  dplyr::select(SNP, T) %>% 
+  rename(Arya = T)
+  
+SA_Huang_18_h_T <- SA_h_Huang_18_GWAS %>% 
+  dplyr::select(SNP, T) %>% 
+  rename(Huang_18 = T)
+
+SA_Huang_25_h_T <- SA_h_Huang_25_GWAS %>% 
+  dplyr::select(SNP, T) %>% 
+  rename(Huang_25 = T)
+
+SA_Huang_28_h_T <- SA_h_Huang_28_GWAS %>% 
+  dplyr::select(SNP, T) %>% 
+  rename(Huang_28 = T)
+
+SA_h_effect_sizes <-
+  SA_Arya_h_T %>%
+  inner_join(SA_Huang_18_h_T, by = "SNP") %>%
+  inner_join(SA_Huang_25_h_T, by = "SNP") %>%
+  inner_join(SA_Huang_28_h_T, by = "SNP") 
+
+
+SA_h_effect_size_values <-
+  SA_h_effect_sizes %>% 
+  dplyr::select(2:5)
+
+if(!file.exists("data/Derived/GWAS_results/SA_h_meta_results.csv")) {
+
+S_hom <- SHom(SA_h_effect_size_values, Sample_size_SA, SNP_SA_h_corr_matrix)
+
+# calculate meta-p-values and bind the two together with the SNP names
+
+p_S_hom <- pchisq(S_hom, df = 1, ncp = 0, lower.tail = F) %>% 
+  as_tibble() %>% 
+  bind_cols(S_hom) %>% 
+  rename(meta_p_hom = value, 
+         S_hom = ...2)
+
+# Calculate S_het, an extension of S_hom that improves power when the genetic effect sizes vary for different traits (probably not such a problem here given all traits we investigate are some version of life expectancy)
+
+# estimate parameters of gamma distribution
+
+para <- EstimateGamma(N = 1E4, Sample_size_SA, SNP_SA_h_corr_matrix);
+
+S_het <- SHet(SA_h_effect_size_values, Sample_size_SA, SNP_SA_h_corr_matrix)
+
+# obtain P-values of S_Het using the estimated gamma parameters
+  
+p_S_het <- pgamma(q = S_het-para[3], shape = para[1], scale = para[2], lower.tail = F) %>% 
+  as_tibble() %>% 
+  bind_cols(S_het) %>% 
+  rename(meta_p_het = value, 
+         S_het = ...2)
+
+
+SA_h_meta_results <- 
+  SA_h_effect_sizes %>% 
+  bind_cols(p_S_hom,
+            p_S_het) # add the unadjusted p values
+
+write_csv(SA_h_meta_results, "data/Derived/GWAS_results/SA_h_meta_results.csv")
+} else SA_h_meta_results <- read_csv("data/Derived/GWAS_results/SA_h_meta_results.csv")
+
+```
+
+## Plot the results
+
+We combine GWAS summary statistics calculated from lifespan data measured across different contexts. It's possible that some SNPs have G x E interactions that would lead to a heterogeneous effect across phenotypes. We therefore utilise the `S_het` calculated p-values.
+
+First lets show the effect of CPASSOC on the number of variants found to be associated with life expectancy and lifespan equality.
+
+
+**Table XX**. Genotype to phenotype associations detected by univariate GWAS, for **lifespan equality**. The total row shows the number of unique candidate variants identified across all studies.
+```{r}
+  
+tibble(Analysis = c("CPASSOC", "Univariate", "CPASSOC", "Univariate"),
+       Trait = c("Life expectancy", "Life expectancy", "Lifespan equality", "Lifespan equality"),
+       `p < 0.05e-05 variants` = c(sum(SA_e0_meta_results$meta_p_het < 0.00005),
+                                  SA_p_05_SNPs_e0,
+                                  sum(SA_h_meta_results$meta_p_het < 0.00005),
+                                  SA_p_05_SNPs_h),
+       `p < 0.05e-08 variants` = c(sum(SA_e0_meta_results$meta_p_het < 0.00000005),
+                                  sum(SA_e0_table$`p < 0.05e-08 variants`),
+                                  sum(SA_h_meta_results$meta_p_het < 0.00000005),
+                                  sum(SA_h_table$`p < 0.05e-08 variants`)))  %>% 
+  kable() %>% 
+  kable_styling()
+
+#SA_e0_meta_results %>% filter(meta_p_hom < 0.00005) %>% 
+ # anti_join(SA_p_05_SNPs_e0) %>% arrange(meta_p_hom)
+#SA_p_05_SNPs_e0
+```
+
+Now lets build some 'Manhattan plots' to show where these significant associations can be found:
+
+```{r, fig.width=11}
+
+SA_common_SNPs <- 
+  SA_e0_meta_results %>% filter(meta_p_het < 0.00005) %>%
+  inner_join(SA_h_meta_results %>% filter(meta_p_het < 0.00005), by = "SNP") %>% 
+  mutate(common_SNP = "YES") %>% 
+  dplyr::select(SNP, common_SNP)
+
+SA_e0_results <- 
+  SA_e0_meta_results %>% 
+  dplyr::select(SNP, meta_p_hom, meta_p_het) %>% 
+  rename(P = meta_p_het) %>% 
+  left_join(common_SNPs) %>% 
+  mutate(common_SNP = if_else(is.na(common_SNP), "NO", common_SNP))
+  
+
+SA_h_results <- 
+  SA_h_meta_results %>% 
+  dplyr::select(SNP, meta_p_hom, meta_p_het) %>% 
+  rename(P = meta_p_het) %>% 
+  left_join(common_SNPs) %>% 
+  mutate(common_SNP = if_else(is.na(common_SNP), "NO", common_SNP))
+
+# plot the results using the manhattan plot custom function we defined earlier
+
+SA_e0_het_plot <- 
+  build_manhattan_plot(SA_e0_results) +
+  labs(title = "SA axis for life expectancy") +
+  theme(plot.title = element_text(size = 20, hjust = 0.5)) +
+  coord_cartesian(ylim = c(0, 10))
+
+SA_h_het_plot <-
+  build_manhattan_plot(SA_h_results) +
+  labs(title = "SA axis for lifespan equality") +
+  theme(plot.title = element_text(size = 20, hjust = 0.5)) +
+  coord_cartesian(ylim = c(0, 10))
+
+
+SA_e0_het_plot + SA_h_het_plot
+```
+
+# Investigating the genetic correlation between e0 and h
+
+## Generating predictions through simulation
+
+The simulations produce phenotypes for 200 lines numbered 1-200. This closely matches the number in the DGRP that have been genotyped. We randomly assign each line one of the true DGRP line numbers to run the GWAS. We run the simulations twice, with different line assignments to check whether line identity changes the shape of the correlations.
+
+```{r}
+{set.seed(1)
+lines <- residual_f_l %>% dplyr::select(line) %>% 
+  slice_sample(n = 200)}
+
+{set.seed(2)
+lines_2 <- residual_f_l %>% dplyr::select(line) %>% 
+  slice_sample(n = 200)
+}
+
+no_change_sim <- read_csv("GWAS simulation data/data_lifespan_no_change.csv")
+a_change_sim <- read_csv("GWAS simulation data/data_lifespan_a_change.csv")
+b_change_sim <- read_csv("GWAS simulation data/data_lifespan_b_change.csv")
+ab_change_sim <- read_csv("GWAS simulation data/data_lifespan_ab_change.csv")
+```
+
+::: {.panel-tabset}
+
+### Run 1
+
+```{r}
+
+# Run the GWAS if we haven't already
+
+if(!file.exists("data/Derived/GWAS_results/e0_no_change_sim_data.tsv.gz")){ 
+
+e0_no_change_sim_data <- prep_for_e0_GWAS(no_change_sim) %>%
+  mutate(line = lines$line) 
+
+run_GWAS(e0_no_change_sim_data)
+
+e0_a_change_sim_data <-prep_for_e0_GWAS(a_change_sim) %>%
+  mutate(line = lines$line)
+
+run_GWAS(e0_a_change_sim_data)
+
+e0_b_change_sim_data <- 
+  prep_for_e0_GWAS(b_change_sim) %>%
+  mutate(line = lines$line)
+
+run_GWAS(e0_b_change_sim_data)
+
+e0_ab_change_sim_data <-
+prep_for_e0_GWAS(ab_change_sim) %>%
+  mutate(line = lines$line)
+
+run_GWAS(e0_ab_change_sim_data)
+
+# Lifespan equality
+
+h_no_change_sim_data <-
+prep_for_h_GWAS(no_change_sim) %>%
+  mutate(line = lines$line)
+
+run_GWAS(h_no_change_sim_data)
+
+h_a_change_sim_data <-
+prep_for_h_GWAS(a_change_sim) %>%
+  mutate(line = lines$line)
+
+run_GWAS(h_a_change_sim_data)
+
+h_b_change_sim_data <-
+prep_for_h_GWAS(b_change_sim) %>%
+  mutate(line = lines$line)
+
+run_GWAS(h_b_change_sim_data)
+
+h_ab_change_sim_data <-
+prep_for_h_GWAS(ab_change_sim) %>%
+  mutate(line = lines$line)
+
+run_GWAS(h_ab_change_sim_data)
+}
+
+```
+
+Load the GWAS results generated from the gompertz simulations
+
+```{r}
+e0_no_change_GWAS <- read_tsv("data/Derived/GWAS_results/e0_no_change_sim_data.tsv.gz")
+h_no_change_GWAS <- read_tsv("data/Derived/GWAS_results/h_no_change_sim_data.tsv.gz")
+
+no_change_SNP_simulation <-
+  e0_no_change_GWAS %>% 
+  rename(e0_effect = BETA) %>% 
+  #mutate(Sex = "Female") %>% 
+  dplyr::select(SNP, e0_effect) %>% 
+  left_join(
+    h_no_change_GWAS %>% 
+      rename(h_effect = BETA) %>% 
+      #mutate(Sex = "Male") %>% 
+      dplyr::select(SNP, h_effect))
+
+e0_a_change_GWAS <- read_tsv("data/Derived/GWAS_results/e0_a_change_sim_data.tsv.gz")
+h_a_change_GWAS <- read_tsv("data/Derived/GWAS_results/h_a_change_sim_data.tsv.gz")
+
+a_change_SNP_simulation <-
+  e0_a_change_GWAS %>% 
+  rename(e0_effect = BETA) %>% 
+  dplyr::select(SNP, e0_effect) %>% 
+  left_join(
+    h_a_change_GWAS %>% 
+      rename(h_effect = BETA) %>% 
+      dplyr::select(SNP, h_effect))
+
+e0_b_change_GWAS <- read_tsv("data/Derived/GWAS_results/e0_b_change_sim_data.tsv.gz")
+h_b_change_GWAS <- read_tsv("data/Derived/GWAS_results/h_b_change_sim_data.tsv.gz")
+
+b_change_SNP_simulation <-
+  e0_b_change_GWAS %>% 
+  rename(e0_effect = BETA) %>% 
+  dplyr::select(SNP, e0_effect) %>% 
+  left_join(
+    h_b_change_GWAS %>% 
+      rename(h_effect = BETA) %>% 
+      dplyr::select(SNP, h_effect))
+
+e0_ab_change_GWAS <- read_tsv("data/Derived/GWAS_results/e0_ab_change_sim_data.tsv.gz")
+h_ab_change_GWAS <- read_tsv("data/Derived/GWAS_results/h_ab_change_sim_data.tsv.gz")
+
+ab_change_SNP_simulation <-
+  e0_ab_change_GWAS %>% 
+  rename(e0_effect = BETA) %>% 
+  dplyr::select(SNP, e0_effect) %>% 
+  left_join(
+    h_ab_change_GWAS %>% 
+      rename(h_effect = BETA) %>% 
+      dplyr::select(SNP, h_effect))
+```
+
+Now we can plot the results to gain some insight into the predicted correlations
+
+```{r}
+
+sim_plot_no_change <-
+  no_change_SNP_simulation %>% 
+  ggplot(aes(x = e0_effect, y = h_effect)) +
+  geom_vline(xintercept = 0, linetype = 2, linewidth = 1) +
+  geom_hline(yintercept = 0, linetype = 2, linewidth = 1) +
+  stat_binhex(bins = 50) +
+  scale_fill_gradientn(colours = pal) +
+  stat_smooth(method = "lm", formula = y ~ x + I(x^2), linewidth = 1, colour = "red") +
+  coord_cartesian(xlim = c(-0.8, 0.8), ylim = c(-0.8, 0.8)) +
+  xlab("Effect on life expectancy") + 
+  ylab("Effect on lifespan equality") +
+  labs(title = "No change in a or b") +
+  theme_bw() +
+  theme(legend.position = "none",
+        text = element_text(size = 12))
+
+sim_plot_a_change <-
+  a_change_SNP_simulation %>% 
+  ggplot(aes(x = e0_effect, y = h_effect)) +
+  geom_vline(xintercept = 0, linetype = 2, linewidth = 1) +
+  geom_hline(yintercept = 0, linetype = 2, linewidth = 1) +
+  stat_binhex(bins = 50) +
+  scale_fill_gradientn(colours = pal) +
+  stat_smooth(method = "lm", formula = y ~ x + I(x^2), linewidth = 1, colour = "red") +
+  coord_cartesian(xlim = c(-0.8, 0.8), ylim = c(-0.8, 0.8)) +
+  xlab("Effect on life expectancy") + 
+  ylab("Effect on lifespan equality") +
+  labs(title = "Change in a") +
+  theme_bw() +
+  theme(legend.position = "none",
+        text = element_text(size = 12))
+
+sim_plot_b_change <-
+  b_change_SNP_simulation %>% 
+  ggplot(aes(x = e0_effect, y = h_effect)) +
+  geom_vline(xintercept = 0, linetype = 2, linewidth = 1) +
+  geom_hline(yintercept = 0, linetype = 2, linewidth = 1) +
+  stat_binhex(bins = 50) +
+  scale_fill_gradientn(colours = pal) +
+  stat_smooth(method = "lm", formula = y ~ x + I(x^2), linewidth = 1, colour = "red") +
+  coord_cartesian(xlim = c(-0.8, 0.8), ylim = c(-0.8, 0.8)) +
+  xlab("Effect on life expectancy") + 
+  ylab("Effect on lifespan equality") +
+  labs(title = "Change in b") +
+  theme_bw() +
+  theme(legend.position = "none",
+        text = element_text(size = 12))
+
+sim_plot_ab_change <-
+  ab_change_SNP_simulation %>% 
+  ggplot(aes(x = e0_effect, y = h_effect)) +
+  geom_vline(xintercept = 0, linetype = 2, linewidth = 1) +
+  geom_hline(yintercept = 0, linetype = 2, linewidth = 1) +
+  stat_binhex(bins = 50) +
+  scale_fill_gradientn(colours = pal) +
+  stat_smooth(method = "lm", formula = y ~ x + I(x^2), linewidth = 1, colour = "red") +
+  coord_cartesian(xlim = c(-0.8, 0.8), ylim = c(-0.8, 0.8)) +
+  xlab("Effect on life expectancy") + 
+  ylab("Effect on lifespan equality") +
+  labs(title = "Change in a and b") +
+  theme_bw() +
+  theme(legend.position = "none",
+        text = element_text(size = 12))
+
+(sim_plot_no_change + sim_plot_a_change) / (sim_plot_b_change + sim_plot_ab_change)
+```
+
+### Run 2
+
+```{r}
+# Run the GWAS again, this time with a different line assigned to each row. The idea is to check whether line identity changes the shape of the correlation
+
+if(!file.exists("data/Derived/GWAS_results/e0_no_change_sim_data_2.tsv.gz")){ 
+
+e0_no_change_sim_data_2 <- prep_for_e0_GWAS(no_change_sim) %>%
+  mutate(line = lines_2$line) 
+
+run_GWAS(e0_no_change_sim_data_2)
+
+e0_a_change_sim_data_2 <-prep_for_e0_GWAS(a_change_sim) %>%
+  mutate(line = lines_2$line)
+
+run_GWAS(e0_a_change_sim_data_2)
+
+e0_b_change_sim_data_2 <- 
+  prep_for_e0_GWAS(b_change_sim) %>%
+  mutate(line = lines_2$line)
+
+run_GWAS(e0_b_change_sim_data_2)
+
+e0_ab_change_sim_data_2 <-
+prep_for_e0_GWAS(ab_change_sim) %>%
+  mutate(line = lines_2$line)
+
+run_GWAS(e0_ab_change_sim_data_2)
+
+# Lifespan equality
+
+h_no_change_sim_data_2 <-
+prep_for_h_GWAS(no_change_sim) %>%
+  mutate(line = lines_2$line)
+
+run_GWAS(h_no_change_sim_data_2)
+
+h_a_change_sim_data_2 <-
+prep_for_h_GWAS(a_change_sim) %>%
+  mutate(line = lines_2$line)
+
+run_GWAS(h_a_change_sim_data_2)
+
+h_b_change_sim_data_2 <-
+prep_for_h_GWAS(b_change_sim) %>%
+  mutate(line = lines_2$line)
+
+run_GWAS(h_b_change_sim_data_2)
+
+h_ab_change_sim_data_2 <-
+prep_for_h_GWAS(ab_change_sim) %>%
+  mutate(line = lines_2$line)
+
+run_GWAS(h_ab_change_sim_data_2)
+}
+```
+
+Load the GWAS results generated from the gompertz simulations
+
+```{r}
+e0_no_change_GWAS_2 <- read_tsv("data/Derived/GWAS_results/e0_no_change_sim_data_2.tsv.gz")
+h_no_change_GWAS_2 <- read_tsv("data/Derived/GWAS_results/h_no_change_sim_data_2.tsv.gz")
+
+no_change_SNP_simulation_2 <-
+  e0_no_change_GWAS_2 %>% 
+  rename(e0_effect = BETA) %>% 
+  #mutate(Sex = "Female") %>% 
+  dplyr::select(SNP, e0_effect) %>% 
+  left_join(
+    h_no_change_GWAS_2 %>% 
+      rename(h_effect = BETA) %>% 
+      #mutate(Sex = "Male") %>% 
+      dplyr::select(SNP, h_effect))
+
+e0_a_change_GWAS_2 <- read_tsv("data/Derived/GWAS_results/e0_a_change_sim_data_2.tsv.gz")
+h_a_change_GWAS_2 <- read_tsv("data/Derived/GWAS_results/h_a_change_sim_data_2.tsv.gz")
+
+a_change_SNP_simulation_2 <-
+  e0_a_change_GWAS_2 %>% 
+  rename(e0_effect = BETA) %>% 
+  dplyr::select(SNP, e0_effect) %>% 
+  left_join(
+    h_a_change_GWAS_2 %>% 
+      rename(h_effect = BETA) %>% 
+      dplyr::select(SNP, h_effect))
+
+e0_b_change_GWAS_2 <- read_tsv("data/Derived/GWAS_results/e0_b_change_sim_data_2.tsv.gz")
+h_b_change_GWAS_2 <- read_tsv("data/Derived/GWAS_results/h_b_change_sim_data_2.tsv.gz")
+
+b_change_SNP_simulation_2 <-
+  e0_b_change_GWAS_2 %>% 
+  rename(e0_effect = BETA) %>% 
+  dplyr::select(SNP, e0_effect) %>% 
+  left_join(
+    h_b_change_GWAS_2 %>% 
+      rename(h_effect = BETA) %>% 
+      dplyr::select(SNP, h_effect))
+
+e0_ab_change_GWAS_2 <- read_tsv("data/Derived/GWAS_results/e0_ab_change_sim_data_2.tsv.gz")
+h_ab_change_GWAS_2 <- read_tsv("data/Derived/GWAS_results/h_ab_change_sim_data_2.tsv.gz")
+
+ab_change_SNP_simulation_2 <-
+  e0_ab_change_GWAS_2 %>% 
+  rename(e0_effect = BETA) %>% 
+  dplyr::select(SNP, e0_effect) %>% 
+  left_join(
+    h_ab_change_GWAS_2 %>% 
+      rename(h_effect = BETA) %>% 
+      dplyr::select(SNP, h_effect))
+```
+
+Plot the results from the second run
+
+```{r}
+
+sim_plot_no_change_2 <-
+  no_change_SNP_simulation_2 %>% 
+  ggplot(aes(x = e0_effect, y = h_effect)) +
+  geom_vline(xintercept = 0, linetype = 2, linewidth = 1) +
+  geom_hline(yintercept = 0, linetype = 2, linewidth = 1) +
+  stat_binhex(bins = 50) +
+  scale_fill_gradientn(colours = pal) +
+  stat_smooth(method = "lm", formula = y ~ x + I(x^2), linewidth = 1, colour = "red") +
+  coord_cartesian(xlim = c(-0.8, 0.8), ylim = c(-0.8, 0.8)) +
+  xlab("Effect on life expectancy") + 
+  ylab("Effect on lifespan equality") +
+  labs(title = "No change in a or b") +
+  theme_bw() +
+  theme(legend.position = "none",
+        text = element_text(size = 12))
+
+sim_plot_a_change_2 <-
+  a_change_SNP_simulation_2 %>% 
+  ggplot(aes(x = e0_effect, y = h_effect)) +
+  geom_vline(xintercept = 0, linetype = 2, linewidth = 1) +
+  geom_hline(yintercept = 0, linetype = 2, linewidth = 1) +
+  stat_binhex(bins = 50) +
+  scale_fill_gradientn(colours = pal) +
+  stat_smooth(method = "lm", formula = y ~ x + I(x^2), linewidth = 1, colour = "red") +
+  coord_cartesian(xlim = c(-0.8, 0.8), ylim = c(-0.8, 0.8)) +
+  xlab("Effect on life expectancy") + 
+  ylab("Effect on lifespan equality") +
+  labs(title = "Change in a") +
+  theme_bw() +
+  theme(legend.position = "none",
+        text = element_text(size = 12))
+
+sim_plot_b_change_2 <-
+  b_change_SNP_simulation_2 %>% 
+  ggplot(aes(x = e0_effect, y = h_effect)) +
+  geom_vline(xintercept = 0, linetype = 2, linewidth = 1) +
+  geom_hline(yintercept = 0, linetype = 2, linewidth = 1) +
+  stat_binhex(bins = 50) +
+  scale_fill_gradientn(colours = pal) +
+  stat_smooth(method = "lm", formula = y ~ x + I(x^2), linewidth = 1, colour = "red") +
+  coord_cartesian(xlim = c(-0.8, 0.8), ylim = c(-0.8, 0.8)) +
+  xlab("Effect on life expectancy") + 
+  ylab("Effect on lifespan equality") +
+  labs(title = "Change in b") +
+  theme_bw() +
+  theme(legend.position = "none",
+        text = element_text(size = 12))
+
+sim_plot_ab_change_2 <-
+  ab_change_SNP_simulation_2 %>% 
+  ggplot(aes(x = e0_effect, y = h_effect)) +
+  geom_vline(xintercept = 0, linetype = 2, linewidth = 1) +
+  geom_hline(yintercept = 0, linetype = 2, linewidth = 1) +
+  stat_binhex(bins = 50) +
+  scale_fill_gradientn(colours = pal) +
+  stat_smooth(method = "lm", formula = y ~ x + I(x^2), linewidth = 1, colour = "red") +
+  coord_cartesian(xlim = c(-0.8, 0.8), ylim = c(-0.8, 0.8)) +
+  xlab("Effect on life expectancy") + 
+  ylab("Effect on lifespan equality") +
+  labs(title = "Change in a and b") +
+  theme_bw() +
+  theme(legend.position = "none",
+        text = element_text(size = 12))
+
+(sim_plot_no_change_2 + sim_plot_a_change_2) / (sim_plot_b_change_2 + sim_plot_ab_change_2)
+```
+:::
+
+## The real data
+
+First, let's have a look at the shape and pace relationship within studies and treatments
+
+```{r}
+entire_SNP_set <- 
+   bind_rows(
+    Arya_f_l_GWAS %>% 
+      mutate(Study = "Arya_2010", Sex = "Female", Temperature = 25),
+    Huang_f_18_l_GWAS %>% 
+      mutate(Study= "Huang_2020", Sex= "Female", Temperature= 18),
+    Huang_f_25_l_GWAS %>% 
+      mutate(Study= "Huang_2020", Sex= "Female", Temperature= 25),
+    Huang_f_28_l_GWAS %>% 
+      mutate(Study= "Huang_2020", Sex= "Female", Temperature= 28),
+    Wilson_f_l_GWAS %>% 
+      mutate(Study= "Wilson_2020", Sex= "Female", Temperature= 25),
+    Durham_f_l_GWAS %>% 
+      mutate(Study= "Durham_2014", Sex= "Female", Temperature= 25),
+    Patel_f_l_GWAS %>% 
+      mutate(Study= "Patel_2021", Sex= "Female", Temperature= 23),
+    Arya_m_l_GWAS %>% 
+      mutate(Study= "Arya_2010", Sex= "Male", Temperature= 25),
+    Huang_m_18_l_GWAS %>% 
+      mutate(Study= "Huang_2020", Sex= "Male", Temperature= 18),
+    Huang_m_25_l_GWAS %>% 
+      mutate(Study= "Huang_2020", Sex= "Male", Temperature = 25),
+    Huang_m_28_l_GWAS %>% 
+      mutate(Study = "Huang_2020", Sex = "Male", Temperature = 28)) %>% 
+  dplyr::select(SNP, BETA, Study, Sex, Temperature) %>% 
+  rename(e0_effect = BETA) %>% 
+  left_join(
+     bind_rows(
+    Arya_f_h_GWAS %>% 
+      mutate(Study = "Arya_2010", Sex = "Female", Temperature = 25),
+    Huang_f_18_h_GWAS %>% 
+      mutate(Study= "Huang_2020", Sex= "Female", Temperature= 18),
+    Huang_f_25_h_GWAS %>% 
+      mutate(Study= "Huang_2020", Sex= "Female", Temperature= 25),
+    Huang_f_28_h_GWAS %>% 
+      mutate(Study= "Huang_2020", Sex= "Female", Temperature= 28),
+    Wilson_f_h_GWAS %>% 
+      mutate(Study= "Wilson_2020", Sex= "Female", Temperature= 25),
+    Durham_f_h_GWAS %>% 
+      mutate(Study= "Durham_2014", Sex= "Female", Temperature= 25),
+    Patel_f_h_GWAS %>% 
+      mutate(Study= "Patel_2021", Sex= "Female", Temperature= 23),
+    Arya_m_h_GWAS %>% 
+      mutate(Study= "Arya_2010", Sex= "Male", Temperature= 25),
+    Huang_m_18_h_GWAS %>% 
+      mutate(Study= "Huang_2020", Sex= "Male", Temperature= 18),
+    Huang_m_25_h_GWAS %>% 
+      mutate(Study= "Huang_2020", Sex= "Male", Temperature = 25),
+    Huang_m_28_h_GWAS %>% 
+      mutate(Study = "Huang_2020", Sex = "Male", Temperature = 28)) %>% 
+  dplyr::select(SNP, BETA, Study, Sex, Temperature) %>% 
+    rename(h_effect = BETA)
+  ) %>% 
+  unite(col = "Treatment", Study:Temperature, sep = " ")
+
+Big_cor_plot <-
+  entire_SNP_set %>% 
+    ggplot(aes(x = e0_effect, y = h_effect)) +
+    geom_vline(xintercept = 0, linetype = 2, linewidth = 1) +
+    geom_hline(yintercept = 0, linetype = 2, linewidth = 1) +
+    stat_binhex(bins = 50) +
+    scale_fill_gradientn(colours = pal) +
+    #stat_smooth(method = "lm", formula = y ~ x + I(x^2), linewidth = 1, colour = "black") +
+    coord_cartesian(xlim = c(-0.8, 0.8), ylim = c(-0.8, 0.8)) +
+    facet_wrap(~Treatment) +
+    xlab("Minor allele effect on life expectancy") + 
+    ylab("Minor allele effect on lifespan equality") +
+    theme_bw() +
+    theme(legend.position = "none",
+          text = element_text(size = 12),
+          plot.title = element_text(hjust = 0.5))
+
+Big_cor_plot
+
+```
+
+So within treatments we always find a strong positive genetic correlation between life expectancy and lifespan equality.
+
+## Using the residual genotypic values
+
+Using a hierarchical model, we previously partitioned the variance in life expectancy and lifespan equality caused by variation in:
+
+- Temperature
+
+- Mating status
+
+- Study conditions e.g. lab effects such as diet used.
+
+- Measurement error
+
+With these sources of variation quantified, we can account for them and predict line means for both life expectancy and lifespan equality. These means approximate the phenotypic product of the additive genotype that is not affected by the (measured) environment i.e. the phenotypic effects of alleles that influence ageing in response to temperature etc. are not included in these residual means. 
+
+```{r}
+if(!file.exists("data/Derived/GWAS_results/residual_f_l.tsv.gz")){
+  run_GWAS(residual_f_l)
+  run_GWAS(residual_m_l)
+  run_GWAS(residual_f_h)
+  run_GWAS(residual_m_h)
+}
+
+residual_f_l_GWAS <- read_tsv("data/Derived/GWAS_results/residual_f_l.tsv.gz") 
+residual_m_l_GWAS <- read_tsv("data/Derived/GWAS_results/residual_m_l.tsv.gz") 
+residual_f_h_GWAS <- read_tsv("data/Derived/GWAS_results/residual_f_h.tsv.gz") 
+residual_m_h_GWAS <- read_tsv("data/Derived/GWAS_results/residual_m_h.tsv.gz") 
+
+residual_SNP_data <-
+  residual_f_l_GWAS %>% 
+  rename(Lifespan_female = BETA) %>% 
+  dplyr::select(SNP, Lifespan_female) %>% 
+  left_join(
+    residual_m_l_GWAS %>% 
+      rename(Lifespan_male = BETA) %>% 
+      dplyr::select(SNP, Lifespan_male)) %>% 
+  left_join(
+    residual_f_h_GWAS %>% 
+      rename(Equality_female = BETA) %>% 
+      dplyr::select(SNP, Equality_female)) %>% 
+  left_join(
+    residual_m_h_GWAS %>% 
+      rename(Equality_male = BETA) %>% 
+      dplyr::select(SNP, Equality_male))
+
+```
+
+Calculate the genetic correlation between life expectancy and lifespan equality, measured in both sexes.
+
+```{r}
+
+residual_SNP_data %>% 
+  dplyr::select(-SNP) %>% 
+  cor(use = "pairwise.complete.obs") %>% 
+  kable(digits = 3) %>% kable_styling()
+
+```
+
+Intriguingly, life expectancy now has a negative genetic correlation with lifespan equality. **So what's so different about the GWA beta coefficients calculated from the residual line mean values?**
+
+Lets plot the data to show these genetic correlations
+
+```{r, fig.height=8}
+  
+e0_h_plot_female <-
+  residual_SNP_data %>% 
+  ggplot(aes(x = Lifespan_female, y = Equality_female)) +
+  geom_vline(xintercept = 0, linetype = 2, linewidth = 1) +
+  geom_hline(yintercept = 0, linetype = 2, linewidth = 1) +
+  stat_binhex(bins = 50) +
+  scale_fill_gradientn(colours = pal) +
+  stat_smooth(method = "lm", formula = y ~ x + I(x^2), linewidth = 1, colour = "red") +
+  coord_cartesian(xlim = c(-0.8, 0.8), ylim = c(-0.8, 0.8)) +
+  xlab("Effect on female lifespan") + 
+  ylab("Effect on female lifespan equality") +
+  theme_bw() +
+  theme(legend.position = "none",
+        text = element_text(size = 12))
+
+e0_h_plot_male <-
+  residual_SNP_data %>% 
+  ggplot(aes(x = Lifespan_male, y = Equality_male)) +
+  geom_vline(xintercept = 0, linetype = 2, linewidth = 1) +
+  geom_hline(yintercept = 0, linetype = 2, linewidth = 1) +
+  stat_binhex(bins = 50) +
+  scale_fill_gradientn(colours = pal) +
+  stat_smooth(method = "lm", formula = y ~ x + I(x^2), linewidth = 1, colour = "red") +
+  coord_cartesian(xlim = c(-0.8, 0.8), ylim = c(-0.8, 0.8)) +
+  xlab("Effect on male lifespan") + 
+  ylab("Effect on male\nlifespan equality") +
+  theme_bw() +
+  theme(legend.position = "none",
+        text = element_text(size = 12))
+
+e0_h_plot_female / e0_h_plot_male + plot_annotation(tag_levels = "A")
+  
+```
+
