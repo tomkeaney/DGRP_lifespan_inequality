@@ -3042,7 +3042,7 @@ Patel_2021_f <-
 ```
 
 
-```{r, fig.height=10}
+```{r, fig.height=10, fig.width=12}
 
 ageing_axis_plot <- function(data, study_title){
 data %>% 
