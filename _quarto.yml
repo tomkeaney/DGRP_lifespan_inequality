@@ -3,11 +3,13 @@ project:
   output-dir: docs
 
 website:
-  title: "Is ageing really invariant within species?"
+  title: "Variation in the rate of ageing"
   navbar:
     left:
       - href: home.qmd
         text: Home page
+      - href: data_collation.qmd
+        text: Data collation
       - href: GWAS.qmd
         text: Genetic analysis
 
@@ -15,7 +17,7 @@ website:
       - icon: github
         menu:
           - text: Source Code
-            url:  https://github.com/tomkeaney/Selfish_inbreeding
+            url:  https://tomkeaney.github.io/DGRP_lifespan_inequality
 
 format:
   html:

@@ -1,0 +1,237 @@
+---
+title: "Data collation"
+format: html
+editor: source
+execute:
+  warning: false
+  message: false
+---
+
+```{r}
+#| results: hide
+
+library(tidyverse) # tidy coding, ggplot etc
+```
+
+
+# The DGRP dataset
+
+
+
+## The raw data
+
+The entire raw dataset can be downloaded as a `.csv` file [here](https://github.com/tomkeaney/DGRP_lifespan_inequality). The dataset contains the following columns:
+
+`line`: the DGRP line (genotype).
+
+`Sex`: is the fly a female or a male?
+
+`Vial_ID`: in many of the studies (but not all), multiple flies were kept together in the same environment. It is common practice to record which flies shared the same environment, because a common environment can explain why some flies might exhibit similar mortality related phenotypes e.g. if humidity is slightly lower in one environment than another, an increased risk of desiccation is shared by all flies in that environment. It is called Vial_ID because the most common way to house Drosophila is in cylindrical vials.
+
+`Death_day`: the number of days the fly survived as an adult, that were tracked during the lifespan assay.
+
+`Adult_age_at_start`: often, a few days elapsed before adult flies entered the lifespan assay. Thus, for comparison across studies, these days must be added to the Death_day count to find the true adult lifespan.
+
+`Lifespan`: the number of days the fly survived as an adult.
+
+`Block`: because of the large number of DGRP lines, often studies split their experiment into separate blocks, each of which assays a fraction of the total number of lines. These blocks are temporally separated, and generally deal with different generations of flies. Note that blocks are rarely balanced with respect to line e.g. all the sampling of line 10 is done in block 1.
+
+`Treatment`: some studies measure lifespan in multiple environmental contexts. We explicitly include some of these treatments in our analysis, whereas others are left out. To deal with these enviornmental within-study differences, we use this treatment variable as a random effect in our demographic models.
+
+`Study`: the study that first reports the data.
+
+`Temperature`: the temperature, in degrees Celsius, that the lifespan assay was completed at. 
+
+`Yeast_percentage`: the overall % of the food recipe made up by brewers yeast. This is a common ingredient in _Drosophila_ food, and the key source of protein. Several studies in our dataset were specifically interested in restriction of protein availability as a method to extend lifespan. Exact dietary compositions are rarely reported, making this a difficult variable to include in meta-analysis.
+
+`Social_group_size`: the number of flies housed together in a vial (or bottle), at the onset of the fitness assay. As individuals died, social group sizes decreased.
+
+`Density`: the number of flies per cm^3 of available space. Calculated as Social_group_size / 47cm^3 for _Drosophila_ vials and Social_group_size / 150cm^3 for _Drosophila_ bottles.
+
+`Mated`: across our identified studies, three mating states were used in the lifespan assays. Flies were either kept as virgins for their entire lives (Mated = NO), were allowed to mate for a short period prior to the lifespan assay (Mated = Prior to assay), or kept in mixed sex groups and thus allowed to mate throughout their lives. 
+
+`Prop_female`: the proportion of females kept within each environment.
+
+`Genotyped`: indicates whether the DGRP line has sequence data available. Most do, but a few lines included in the early studies (pre-2012) did not end up getting genotyped. 
+
+```{r}
+#| results: hide
+
+# Load genotyped lines reported in Huang et al for cross-matching and filtering
+
+genotyped_lines <- read_csv("data/Input/Genotyped_lines.csv") %>% 
+  mutate(line = as.factor(line),
+         Genotyped = "YES")
+
+# Load the lifespan datasets 
+
+Arya_raw_data <- read_csv("data/Input/Raw_data/Arya_2010.csv") %>% 
+  mutate(Sex = if_else(Sex == "F", "Female", "Male")) %>% 
+  mutate(line = as.factor(line),
+         Sex = as.factor(Sex),
+         Vial_ID = as.factor(Vial_ID),
+         Block = as.factor(Block),
+         Diet = as.numeric(Diet),
+         Adult_age_at_start = 2,
+         Social_group_size = Density,
+         Density = Density / 47,
+         Death_day = Lifespan,
+         Lifespan = Death_day + Adult_age_at_start,
+         Treatment = 1) %>% 
+  dplyr::select(line, Sex, Vial_ID, Lifespan, Adult_age_at_start, Death_day, Block, Treatment, Study, Temperature, Diet, Social_group_size, Density, Mated, Prop_female)
+
+Arya_lines <- Arya_raw_data %>% distinct(line) %>% inner_join(genotyped_lines) %>% nrow() # differs from Ivanov because they collected a little bit more data in that study and combined with Ivanov. Those data were not emailed.
+
+Huang_raw_data <- read_csv("data/Input/Raw_data/Huang_2020.csv") %>% 
+  dplyr::select(-Vial_ID2) %>% 
+  mutate(line = as.factor(Line),
+         Sex = as.factor(Sex),
+         Vial_ID = as.factor(Vial_ID),
+         Block = as.factor(Block),
+         Diet = as.numeric(Diet),
+         Study = "Huang_2020",
+         Adult_age_at_start = 1,
+         Social_group_size = Density,
+         Density = Density / 47,
+         Death_day = Lifespan,
+         Lifespan = Death_day + Adult_age_at_start,
+         Treatment = case_when(Temperature == 18 ~ 1,
+                               Temperature == 25 ~ 2,
+                               Temperature == 28 ~ 3)) %>% 
+  dplyr::select(line, Sex, Vial_ID, Lifespan, Adult_age_at_start, Death_day, Block, Treatment, Study, Temperature, Diet, Social_group_size, Density, Mated, Prop_female)
+
+Huang_lines <- Huang_raw_data %>% distinct(line) %>% inner_join(genotyped_lines) %>% nrow() # perfect match with study
+
+Wilson_raw_data <- read_csv("data/Input/Raw_data/Wilson_2020.csv") %>% 
+  rename(Vial_ID = Replicate,
+         Block = Week) %>% 
+  mutate(line = as.factor(Line),
+         Sex = as.factor(Sex),
+         Vial_ID = as.factor(Vial_ID),
+         Block = as.factor(Block),
+         Diet = as.numeric(Diet),
+         Adult_age_at_start = 2,
+         Social_group_size = Density,
+         Density = Density / 47,
+         Death_day = Lifespan,
+         Lifespan = Death_day + Adult_age_at_start,
+         Treatment = if_else(Diet == 0.5, 1, 2)) %>% 
+  dplyr::select(line, Sex, Vial_ID, Lifespan, Adult_age_at_start, Death_day, Block, Treatment, Study, Temperature, Diet, Social_group_size, Density, Mated, Prop_female)
+
+Wilson_lines <- Wilson_raw_data %>% distinct(line) %>% inner_join(genotyped_lines) %>%  nrow() # perfect match with study
+
+
+Durham_raw_data <- read_csv("data/Input/Raw_data/Durham_2014.csv") %>% 
+  dplyr::select(1:4, 6, 14:18) %>% 
+  rename(Vial_ID = Fly_ID) %>% 
+  mutate(Sex = "Female") %>% 
+  mutate(line = as.factor(Line),
+         Sex = as.factor(Sex),
+         Vial_ID = as.factor(Vial_ID),
+         Block = as.factor(Block),
+         Diet = as.numeric(Diet),
+         Adult_age_at_start = 0,
+         Social_group_size = Density,
+         Density = Density / 47,
+         Death_day = Lifespan,
+         Lifespan = Death_day + Adult_age_at_start,
+         Treatment = 1) %>% 
+  dplyr::select(line, Sex, Vial_ID, Lifespan, Adult_age_at_start, Death_day, Block, Treatment, Study, Temperature, Diet, Social_group_size, Density, Mated, Prop_female)
+
+Durham_lines <- Durham_raw_data %>% distinct(line) %>% inner_join(genotyped_lines) %>%  nrow() # 189 lines, but only 176 that have been genotyped
+
+Patel_raw_data <- read_csv("data/Input/Raw_data/Patel_2021.csv") %>% 
+  left_join(read_csv("data/Input/Raw_data/Patel_2021.csv") %>% distinct(Line) %>% mutate(Vial_ID = 1:n())) %>%
+  mutate(Diet = 4,
+         line = str_remove(Line, "DGRP "),
+         line = as.factor(line),
+         Sex = as.factor(Sex),
+         Vial_ID = as.factor(Vial_ID),
+         Block = as.factor(Block),
+         Diet = as.numeric(Diet),
+         Adult_age_at_start = 2,
+         Social_group_size = Density,
+         Density = Density / 47,
+         Death_day = Lifespan,
+         Lifespan = Death_day + Adult_age_at_start,
+         Treatment = 1) %>% 
+  dplyr::select(line, Sex, Vial_ID, Lifespan, Adult_age_at_start, Death_day, Block, Treatment, Study, Temperature, Diet, Social_group_size, Density, Mated, Prop_female)
+
+Patel_lines <- Patel_raw_data %>% distinct(line) %>% inner_join(genotyped_lines) %>% nrow() # perfect match with study
+  
+  
+Dick_raw_data <- read_csv("data/Input/Raw_data/Dick_2011_tidy.csv") %>% 
+  dplyr::select(-Replicate) %>% 
+  mutate(line = as.factor(Line),
+         Sex = as.factor(Sex),
+         Vial_ID = as.factor(Vial_ID),
+         Block = as.factor(Block),
+         Adult_age_at_start = 0,
+         Social_group_size = Density,
+         Density = Density / 150,
+         Death_day = Lifespan,
+         Lifespan = Death_day + Adult_age_at_start,
+         Diet = if_else(Diet == "R_M", "5", Diet),
+         Diet = as.numeric(Diet)) %>% # note that some flies had their diet supplemented with water, hence why there are three treatment levels
+  dplyr::select(line, Sex, Vial_ID, Lifespan, Adult_age_at_start, Death_day, Block, Treatment, Study, Temperature, Diet, Social_group_size, Density, Mated, Prop_female)
+
+Dick_lines <- Dick_raw_data %>% distinct(line) %>% inner_join(genotyped_lines) %>% nrow() # perfect match with study
+  
+Hoffman_raw_data <- read.csv("data/Input/Raw_data/tidy_Hoffman_2021.csv") %>% 
+  as_tibble() %>% 
+  rename(Vial_ID = Vial) %>% 
+  mutate(line = as.factor(Line),
+         Sex = as.factor(Sex),
+         Vial_ID = as.factor(Vial_ID),
+         Block = as.factor(Block),
+         Diet = as.numeric(Diet),
+         Adult_age_at_start = 5,
+         Social_group_size = Density,
+         Density = Density / 47,
+         Death_day = Lifespan,
+         Lifespan = Death_day + Adult_age_at_start) %>% 
+  dplyr::select(line, Sex, Vial_ID, Lifespan, Adult_age_at_start, Death_day, Block, Treatment, Study, Temperature, Diet, Social_group_size, Density, Mated, Prop_female)
+
+Hoffman_lines <- Hoffman_raw_data %>% distinct(line) %>% inner_join(genotyped_lines) %>% nrow()
+# note that Hoffman et al report data from 12 lines, but their dataset contains 16 lines. This is because they were interested in repeatability and only 12 lines were measured in both of their treatments. We use all 16 lines.
+
+Zhao_raw_data <- read_csv("data/Input/Raw_data/tidy_Zhao_2022.csv") %>% 
+  rename(Vial_ID = Vial) %>% 
+  mutate(line = as.factor(Line),
+         Sex = as.factor(Sex),
+         Vial_ID = as.factor(Vial_ID),
+         Block = as.factor(Block),
+         Diet = as.numeric(10),
+         Adult_age_at_start = 0, # they were 3 days old upon entrance, but this is already accounted for in the death day measure
+         Social_group_size = Density,
+         Density = Density / 47,
+         Death_day = Lifespan,
+         Lifespan = Death_day + Adult_age_at_start,
+         Treatment = 1) %>% 
+  dplyr::select(line, Sex, Vial_ID, Lifespan, Adult_age_at_start, Death_day, Block, Treatment, Study, Temperature, Diet, Social_group_size, Density, Mated, Prop_female)
+
+Zhao_lines <- Zhao_raw_data %>% distinct(line) %>% inner_join(genotyped_lines) %>% nrow()
+
+# combine them into a single tibble
+
+All_raw_data <- 
+  bind_rows(Arya_raw_data,
+            Huang_raw_data,
+            Wilson_raw_data,
+            Durham_raw_data,
+            Patel_raw_data,
+            Dick_raw_data,
+            Hoffman_raw_data,
+            Zhao_raw_data) %>% 
+  filter(!is.na(Lifespan)) %>% 
+  rename(Yeast_percentage = Diet) %>% 
+  left_join(genotyped_lines, by = "line") %>% 
+    mutate(Genotyped = if_else(is.na(Genotyped), "NO", Genotyped),
+           Density = round(Density, 3))
+
+#write_csv(All_raw_data, file ="data/Input/all_raw_data.csv")
+
+#my_data_table(All_raw_data)
+```
+
+
