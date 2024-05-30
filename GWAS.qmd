@@ -1802,6 +1802,7 @@ lifespan_equality_variants %>%
 Now lets build some 'Manhattan plots' to show where these significant associations can be found:
 
 ```{r, fig.width=11}
+#| column: page
 
 common_SNPs <- 
   all_e0_meta_results %>% filter(meta_p_het < 1e-08) %>% 
@@ -1829,12 +1830,12 @@ h_results <-
 e0_het_plot <- build_manhattan_plot(e0_results) +
   labs(title = "Life expectancy") +
   theme(plot.title = element_text(size = 20, hjust = 0.5)) +
-  coord_cartesian(ylim = c(0, 20))
+  coord_cartesian(ylim = c(0, 22))
 
 h_het_plot <- build_manhattan_plot(h_results) +
   labs(title = "Lifespan equality") +
   theme(plot.title = element_text(size = 20, hjust = 0.5)) +
-  coord_cartesian(ylim = c(0, 20))
+  coord_cartesian(ylim = c(0, 22))
 
 
 e0_het_plot + h_het_plot
@@ -3124,7 +3125,7 @@ write_csv(SC_h_meta_results, "data/Derived/GWAS_results/SC_h_meta_results.csv")
 
 ```
 
-### Plot the results
+### Visualise the results
 
 We combine GWAS summary statistics calculated from lifespan data measured across different contexts. It's possible that some SNPs have G x E interactions that would lead to a heterogeneous effect across phenotypes. We therefore utilise the `S_het` calculated p-values.
 
@@ -3216,8 +3217,8 @@ SC_h_variants %>%
 
 Now lets build some 'Manhattan plots' to show where these significant associations can be found:
 
-```{r, fig.width=11}
-
+```{r, fig.width=11, fig.height = 8}
+#| column: page
 SA_e0_results <- 
   SA_e0_meta_results %>% 
   dplyr::select(SNP, meta_p_hom, meta_p_het) %>% 
@@ -4458,7 +4459,7 @@ write_csv(scaling_axis_meta_results, "data/Derived/GWAS_results/scaling_axis_met
 
 ```
 
-### Plot the results
+### Visualise the results
 
 We combine GWAS summary statistics calculated from ageing and scaling axis data measured across different contexts. It's possible that some SNPs have G x E interactions that would lead to a heterogeneous effect across phenotypes. We therefore utilise the `S_het` calculated p-values.
 
@@ -4519,6 +4520,7 @@ scaling_genes %>%
 Now lets build some 'Manhattan plots' to show where these significant associations can be found:
 
 ```{r, fig.width=11}
+#| column: page
 
 ageing_axis_results <- 
   ageing_axis_meta_results %>% 
