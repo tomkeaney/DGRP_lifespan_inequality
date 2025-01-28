@@ -32,4 +32,4 @@ format:
       code-summary: "Show the code"
       smooth-scroll: true
       embed-resources: true # output doc contains all info needed to display html
-      fig-format: png
+      #fig-format: png
